@@ -727,6 +727,7 @@ class PatternDetectionEngine:
 
         return {
             "total_patterns": len(self.patterns),
+            "total_categories": len(category_counts),
             "by_severity": severity_counts,
             "by_category": category_counts,
             "total_scans": self._scan_count,

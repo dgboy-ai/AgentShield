@@ -1,0 +1,176 @@
+/* ─────────────────────────────────────────────────────────────
+ * AGENTSHIELD OWNER — Bastion Neo-Brutalist + Enhanced
+ * Ported from Bastion dashboard/src/styles/*, upgraded for owner
+ * ───────────────────────────────────────────────────────────── */
+
+/* === TOKENS (Bastion variables.css + AgentShield accent) === */
+.owner-root {
+  --font-sans: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-sg: 'Space Grotesk', sans-serif;
+
+  --canvas-bg: #f4f3ef;
+  --canvas-sidebar: #ffffff;
+  --canvas-card: #ffffff;
+  --canvas-elevated: #f9f9f7;
+
+  --accent-breeze: #facc15;
+  --accent-breeze-glow: rgba(250, 204, 21, 0.2);
+  --accent-emerald: #0D7C5F;
+  --accent-emerald-glow: rgba(13, 124, 95, 0.2);
+  --accent-sunset: #ef4444;
+  --accent-sunset-glow: rgba(239, 68, 68, 0.2);
+  --accent-magenta: #7c3aed;
+  --accent-cyan: #0ea5e9;
+
+  --ink: #000000;
+  --body: #1c1917;
+  --mute: #57534e;
+  --faint: #e7e5e4;
+
+  --glass-border: #000000;
+  --glass-bg: #ffffff;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --shadow-sm: 2px 2px 0px 0px #000000;
+  --shadow-md: 4px 4px 0px 0px #000000;
+  --shadow-lg: 6px 6px 0px 0px #000000;
+  --shadow-xl: 8px 8px 0px 0px #000000;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* === LAYOUT (Bastion layout.css) — scoped to .owner-root === */
+.owner-root .owner-layout {
+  display: flex; width: 100%; min-height: 100vh; background: var(--canvas-bg);
+}
+.owner-root .owner-sidebar {
+  width: 248px; min-width: 248px; flex-shrink: 0;
+  background: var(--canvas-sidebar);
+  border-right: 3px solid #000000;
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh; z-index: 50;
+}
+.owner-root .owner-sidebar-top { flex: 1; display: flex; flex-direction: column; padding: 20px 14px; gap: 18px; overflow-y: auto; }
+.owner-root .owner-nav { display: flex; flex-direction: column; gap: 8px; }
+.owner-root .owner-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 2px solid transparent; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 700; color: var(--mute);
+  transition: all 0.15s var(--ease-out); text-decoration: none; font-family: var(--font-sg);
+}
+.owner-root .owner-link:hover {
+  background: #f4f3ef; color: #000; border: 2px solid #000; box-shadow: var(--shadow-sm);
+}
+.owner-root .owner-link.active {
+  background: var(--accent-breeze) !important; color: #000 !important;
+  border: 2px solid #000 !important; box-shadow: 3px 3px 0px 0px #000 !important; font-weight: 800 !important;
+}
+.owner-root .owner-sidebar-footer {
+  padding: 14px; border-top: 3px solid #000; display: flex; align-items: center; gap: 10px; background: #fff;
+}
+.owner-root .owner-viewport { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--canvas-bg); }
+.owner-root .owner-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 28px; border-bottom: 3px solid #000; background: #fff; position: sticky; top: 0; z-index: 10;
+}
+.owner-root .owner-page { padding: 28px 32px; flex: 1; padding-top: 24px; }
+.owner-root .welcome-section { margin-top: 8px; }
+.owner-root .welcome-title { line-height: 1.15; padding-top: 4px; }
+
+/* === COMPONENTS (Bastion components.css) === */
+.owner-root .panel {
+  background: var(--canvas-card); border: 3px solid #000; border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md); overflow: hidden; transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.owner-root .panel:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0px 0px #000; }
+.owner-root .kpi-card {
+  background: var(--canvas-card); border: 3px solid #000; border-radius: var(--radius-md);
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 6px;
+  box-shadow: var(--shadow-sm); transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.owner-root .kpi-card:hover { transform: translate(-1px, -1px); box-shadow: var(--shadow-md); }
+
+.owner-root .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 18px; border: 3px solid #000; border-radius: var(--radius-md);
+  font-size: 13px; font-weight: 800; color: #000; box-shadow: var(--shadow-sm);
+  transition: transform 0.1s var(--ease-out), box-shadow 0.1s var(--ease-out); cursor: pointer; font-family: var(--font-sg);
+}
+.owner-root .btn:active { transform: translate(2px,2px) !important; box-shadow: 0 0 0 0 #000 !important; }
+.owner-root .btn-primary { background: var(--accent-breeze); }
+.owner-root .btn-primary:hover { transform: translate(-1px,-1px); box-shadow: 4px 4px 0 0 #000; }
+.owner-root .btn-emerald { background: var(--accent-emerald); color: #fff; }
+.owner-root .btn-emerald:hover { transform: translate(-1px,-1px); box-shadow: 4px 4px 0 0 #000; }
+.owner-root .btn-outline { background: #fff; }
+.owner-root .btn-outline:hover { background: #f4f3ef; transform: translate(-1px,-1px); box-shadow: 4px 4px 0 0 #000; }
+
+.owner-root .badge {
+  display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--radius-sm);
+  font-size: 10px; font-weight: 800; font-family: var(--font-mono); letter-spacing: 0.6px;
+  border: 2px solid #000; box-shadow: 1px 1px 0 #000; color: #000 !important; text-transform: uppercase;
+}
+.owner-root .badge-yellow { background: var(--accent-breeze); }
+.owner-root .badge-green { background: #10b981; color: #fff !important; }
+.owner-root .badge-red { background: #ef4444; color: #fff !important; }
+.owner-root .badge-purple { background: #a78bfa; }
+.owner-root .badge-cyan { background: #7dd3fc; }
+
+/* === BASTION globals.css — bento + eyebrow + alert === */
+.owner-root .eyebrow {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1.6px; color: #000; background: var(--accent-breeze);
+  border: 2px solid #000; padding: 3px 8px; display: inline-block; box-shadow: 1px 1px 0 #000;
+}
+.owner-root .welcome-title { font-family: var(--font-sg); font-size: 30px; font-weight: 900; color: var(--ink); letter-spacing: -0.02em; }
+.owner-root .welcome-subtitle { font-size: 13px; font-weight: 600; color: var(--mute); max-width: 640px; line-height: 1.6; }
+.owner-root .bento-panel {
+  background: var(--canvas-card) !important; border: 3px solid #000 !important; border-radius: var(--radius-lg) !important;
+  padding: 20px 22px; position: relative; overflow: hidden; box-shadow: var(--shadow-md) !important; transition: all 0.15s ease !important;
+}
+.owner-root .bento-panel:hover { transform: translate(-2px,-2px) !important; box-shadow: 5px 5px 0 0 #000 !important; }
+.owner-root .bento-kpi {
+  background: var(--canvas-card) !important; border: 3px solid #000 !important; border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-sm) !important; transition: all 0.15s ease !important;
+}
+.owner-root .bento-kpi:hover { transform: translate(-1.5px,-1.5px) !important; box-shadow: var(--shadow-md) !important; }
+.owner-root .brutal-hover { transition: all 0.15s ease; }
+.owner-root .brutal-hover:hover { transform: translate(-2px,-2px); box-shadow: 4px 4px 0 0 #000 !important; }
+
+/* === ENHANCED: chain pulse + hash line + stagger === */
+.owner-root .hash-line {
+  height: 3px; border-radius: 999px;
+  background: repeating-linear-gradient(90deg, #0D7C5F 0 6px, transparent 6px 12px);
+  background-size: 200% 100%; animation: hashFlow 2.8s linear infinite;
+}
+@keyframes hashFlow { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+@keyframes chainPulse { 0%,100% { box-shadow: 0 0 0 0 currentColor; } 50% { box-shadow: 0 0 10px 3px currentColor; } }
+.owner-root .chain-dot { transition: all 0.3s var(--ease-spring); }
+.owner-root .panel:hover .chain-dot { animation: chainPulse 1.2s ease-in-out infinite; }
+.owner-root .stagger > * { animation: fadeInUp 0.45s var(--ease-out) both; }
+.owner-root .stagger > *:nth-child(1){animation-delay:0ms} .stagger > *:nth-child(2){animation-delay:60ms}
+.owner-root .stagger > *:nth-child(3){animation-delay:120ms} .stagger > *:nth-child(4){animation-delay:180ms}
+.owner-root .stagger > *:nth-child(5){animation-delay:240ms} .stagger > *:nth-child(6){animation-delay:300ms}
+@keyframes fadeInUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+.owner-root .skeleton { background: linear-gradient(90deg,#e7e5e4 25%,#f5f5f4 50%,#e7e5e4 75%); background-size:200% 100%; animation: shimmer 1.4s ease-in-out infinite; border-radius: var(--radius-sm); }
+
+/* === ENHANCED: yellow glow badge (from Bastion DashboardLayoutWrapper) === */
+@keyframes purpleGlow { 0%{box-shadow:2px 2px 0 #000,0 0 6px rgba(124,58,237,0.35)} 50%{box-shadow:2px 2px 0 #000,0 0 16px rgba(124,58,237,0.75)} 100%{box-shadow:2px 2px 0 #000,0 0 6px rgba(124,58,237,0.35)} }
+@keyframes glint { 0%{transform:translateX(-150%) skewX(-20deg)} 30%{transform:translateX(150%) skewX(-20deg)} 100%{transform:translateX(150%) skewX(-20deg)} }
+.owner-root .glow-badge { position:relative; overflow:hidden; animation: purpleGlow 2.6s infinite ease-in-out; border:2px solid #000 !important; }
+.owner-root .glow-badge::after { content:''; position:absolute; inset:0; background: linear-gradient(90deg,transparent,rgba(255,255,255,0.45),transparent); animation: glint 3.2s infinite ease-in-out; }
+
+/* === Responsive (Bastion) === */
+@media (max-width: 900px) {
+  .owner-root .owner-sidebar { position: fixed; left:0; top:0; bottom:0; transform: translateX(-100%); transition: transform 0.3s var(--ease-out); }
+  .owner-root .owner-sidebar.open { transform: translateX(0); }
+  .owner-root .owner-page { padding: 20px; }
+  .owner-root .owner-header { padding: 12px 16px; }
+}

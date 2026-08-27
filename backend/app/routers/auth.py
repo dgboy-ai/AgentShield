@@ -81,18 +81,10 @@ def get_current_user_dep(
     # If Authorization: Bearer <DEMO_API_TOKEN> and DEMO_API_TOKEN is set, treat as demo user
     demo_token = os.getenv("DEMO_API_TOKEN", "").strip()
     if demo_token and credentials is not None and credentials.credentials == demo_token:
-        # Use or create demo user/org
-        demo_org_id = os.getenv("DEMO_ORG_ID", "").strip()
-        demo_user = None
-        # Try to find demo user by email
         demo_email = os.getenv("DEMO_USER_EMAIL", "demo@agentshield.local")
         demo_user = db.query(User).filter(User.email == demo_email).first()
         if demo_user and demo_user.is_active:
             return demo_user
-        # Fallback: return first active user as demo (read-only demo)
-        fallback = db.query(User).filter(User.is_active == True).first()  # noqa: E712
-        if fallback:
-            return fallback
         raise credentials_exception
 
     if credentials is None or not credentials.credentials:
@@ -126,8 +118,7 @@ def get_optional_user_dep(
         demo_user = db.query(User).filter(User.email == demo_email).first()
         if demo_user and demo_user.is_active:
             return demo_user
-        fallback = db.query(User).filter(User.is_active == True).first()  # noqa: E712
-        return fallback
+        return None
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")

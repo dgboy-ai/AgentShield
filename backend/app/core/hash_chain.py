@@ -177,6 +177,8 @@ class HashChainEngine:
             b"AGENTSHIELD_HASH_CHAIN_SEED_v1"
         ).hexdigest()
         self._listeners: list = []
+        # incremental verify cache: org_id -> (last_len, result)
+        self._verify_cache: dict[str, tuple[int, ChainVerificationResult]] = {}
 
     def add_listener(self, callback):
         self._listeners.append(callback)
@@ -231,6 +233,9 @@ class HashChainEngine:
             self._chains[org_id] = []
         self._chains[org_id].append(entry)
 
+        # invalidate verify cache for this org
+        self._verify_cache.pop(org_id, None)
+
         self._emit(
             "entry_appended",
             {
@@ -275,16 +280,10 @@ class HashChainEngine:
     def verify(self, org_id: str) -> ChainVerificationResult:
         """
         Verify the entire hash chain for an org.
-
-        Traverses every entry, recomputes hashes, and checks
-        that each entry's previous_hash matches the preceding entry's hash.
-
-        Returns:
-            ChainVerificationResult with pass/fail and details
+        Cached incremental: if chain length unchanged since last verify, returns cached result O(1).
+        Otherwise traverses every entry, recomputes hashes.
         """
         import time
-
-        start = time.time()
 
         chain = self._chains.get(org_id, [])
         total = len(chain)
@@ -300,6 +299,13 @@ class HashChainEngine:
                 verification_time_ms=0,
             )
 
+        # cache hit: length unchanged => instant
+        cached = self._verify_cache.get(org_id)
+        if cached and cached[0] == total:
+            return cached[1]
+
+        start = time.time()
+
         for i, entry in enumerate(chain):
             # Check previous hash link
             if i == 0:
@@ -309,7 +315,7 @@ class HashChainEngine:
 
             if entry.previous_hash != expected_prev:
                 elapsed = (time.time() - start) * 1000
-                return ChainVerificationResult(
+                result = ChainVerificationResult(
                     org_id=org_id,
                     total_entries=total,
                     valid_entries=i,
@@ -318,12 +324,14 @@ class HashChainEngine:
                     is_valid=False,
                     verification_time_ms=elapsed,
                 )
+                self._verify_cache[org_id] = (total, result)
+                return result
 
             # Recompute hash and compare
             recomputed = entry._compute_hash()
             if recomputed != entry.entry_hash:
                 elapsed = (time.time() - start) * 1000
-                return ChainVerificationResult(
+                result = ChainVerificationResult(
                     org_id=org_id,
                     total_entries=total,
                     valid_entries=i,
@@ -332,6 +340,8 @@ class HashChainEngine:
                     is_valid=False,
                     verification_time_ms=elapsed,
                 )
+                self._verify_cache[org_id] = (total, result)
+                return result
 
         elapsed = (time.time() - start) * 1000
         result = ChainVerificationResult(
@@ -344,6 +354,7 @@ class HashChainEngine:
             verification_time_ms=elapsed,
         )
 
+        self._verify_cache[org_id] = (total, result)
         self._emit("chain_verified", result.to_dict())
         return result
 
@@ -453,6 +464,7 @@ class HashChainEngine:
         self._chains.clear()
         self._sequence_counters.clear()
         self._anchors.clear()
+        self._verify_cache.clear()
 
     def get_chain_as_jsonl(self, org_id: str) -> str:
         """Export the chain as JSONL (append-only log format)."""

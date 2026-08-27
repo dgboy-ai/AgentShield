@@ -30,9 +30,20 @@ class ScanManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return ScanResult.from_dict(resp.json())
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return ScanResult.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def patterns(self) -> dict:
         """Get the full pattern library and stats."""
@@ -43,9 +54,20 @@ class ScanManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def _require_auth(self):
         if not self._auth.token:
@@ -56,10 +78,5 @@ class ScanManager:
 
     @staticmethod
     def _translate_error(e: httpx.HTTPStatusError):
-        status = e.response.status_code
-        try:
-            detail = e.response.json()
-        except Exception:
-            detail = {"message": str(e)}
-        msg = detail.get("detail", str(e))
-        raise AgentShieldError(msg, status_code=status, detail=detail)
+        from .client import translate_http_error
+        return translate_http_error(e)

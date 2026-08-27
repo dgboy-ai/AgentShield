@@ -4,6 +4,7 @@ from .memories import router as memories_router
 from .audit import router as audit_router
 from .scan import router as scan_router
 from .public import router as public_router
+from .owner import router as owner_router
 
 __all__ = [
     "auth_router",
@@ -12,4 +13,5 @@ __all__ = [
     "audit_router",
     "scan_router",
     "public_router",
+    "owner_router",
 ]

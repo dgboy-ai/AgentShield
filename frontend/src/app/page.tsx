@@ -1,19 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useAuth } from "@/lib/auth-context";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { CursorGlow } from "@/components/cursor-glow";
 
 export default function Home() {
-  const { token } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (token) router.push("/dashboard");
-  }, [token, router]);
 
   return (
     <div className="min-h-screen" style={{ background: "#F8F4ED" }}>

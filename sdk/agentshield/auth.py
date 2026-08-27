@@ -19,6 +19,8 @@ class AuthManager:
 
     def set_token(self, token: str):
         """Set a JWT token directly (e.g., from a previous session)."""
+        if not token:
+            raise ValueError("Token cannot be empty")
         self._token = token
         self._client.headers["Authorization"] = f"Bearer {token}"
 
@@ -45,7 +47,7 @@ class AuthManager:
             data = resp.json()
             token = Token(
                 access_token=data["access_token"],
-                token_type=data["token_type"],
+                token_type=data.get("token_type", "bearer"),
                 user_id=data["user_id"],
                 org_id=data["org_id"],
             )
@@ -56,6 +58,11 @@ class AuthManager:
             return token
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def login(self, email: str, password: str) -> Token:
         """Login with existing credentials. Returns JWT token."""
@@ -68,7 +75,7 @@ class AuthManager:
             data = resp.json()
             token = Token(
                 access_token=data["access_token"],
-                token_type=data["token_type"],
+                token_type=data.get("token_type", "bearer"),
                 user_id=data["user_id"],
                 org_id=data["org_id"],
             )
@@ -79,6 +86,11 @@ class AuthManager:
             return token
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def me(self) -> User:
         """Get current user info."""
@@ -89,35 +101,18 @@ class AuthManager:
             return User(
                 user_id=data["user_id"],
                 email=data["email"],
-                full_name=data["full_name"],
+                full_name=data.get("full_name", ""),
                 org_id=data["org_id"],
             )
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     @staticmethod
     def _translate_error(e: httpx.HTTPStatusError) -> AgentShieldError:
-        from .exceptions import (
-            AuthenticationError,
-            ValidationError,
-            RateLimitError,
-        )
-
-        status = e.response.status_code
-        try:
-            detail = e.response.json()
-        except Exception:
-            detail = {"message": str(e)}
-
-        msg = detail.get("detail", str(e))
-
-        if status == 401:
-            return AuthenticationError(msg, status_code=status, detail=detail)
-        elif status == 400:
-            return ValidationError(msg, status_code=status, detail=detail)
-        elif status == 422:
-            return ValidationError(msg, status_code=status, detail=detail)
-        elif status == 429:
-            return RateLimitError(msg, status_code=status, detail=detail)
-        else:
-            return AgentShieldError(msg, status_code=status, detail=detail)
+        from .client import translate_http_error
+        return translate_http_error(e)

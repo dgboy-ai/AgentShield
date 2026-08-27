@@ -37,9 +37,20 @@ class AuditManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def timeline(self) -> dict:
         """Get the audit timeline (last 100 events + event counts)."""
@@ -50,9 +61,20 @@ class AuditManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def verify_chain(self) -> dict:
         """Verify audit trail hash chain integrity."""
@@ -63,9 +85,20 @@ class AuditManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def compliance_report(
         self,
@@ -91,9 +124,20 @@ class AuditManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return ComplianceReport.from_dict(resp.json())
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return ComplianceReport.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def export_jsonl(self) -> str:
         """Export audit trail as JSONL."""
@@ -130,10 +174,5 @@ class AuditManager:
 
     @staticmethod
     def _translate_error(e: httpx.HTTPStatusError):
-        status = e.response.status_code
-        try:
-            detail = e.response.json()
-        except Exception:
-            detail = {"message": str(e)}
-        msg = detail.get("detail", str(e))
-        raise AgentShieldError(msg, status_code=status, detail=detail)
+        from .client import translate_http_error
+        return translate_http_error(e)

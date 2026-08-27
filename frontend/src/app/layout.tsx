@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/lib/auth-context";
 import { WebMCPProvider } from "@/components/webmcp-provider";
+import { OwnerAuthProvider } from "@/app/owner/layout";
 
 const dmSans = DM_Sans({
   variable: "--font-dm-sans",
@@ -37,9 +38,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col mesh-bg grain-overlay">
         <AuthProvider>
-          <WebMCPProvider />
-          {children}
-          <Toaster />
+          <OwnerAuthProvider>
+            <WebMCPProvider />
+            {children}
+            <Toaster />
+          </OwnerAuthProvider>
         </AuthProvider>
       </body>
     </html>

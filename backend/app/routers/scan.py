@@ -69,8 +69,8 @@ def scan_text(
 
 
 @router.get("/patterns")
-def get_pattern_library():
-    """Return the full 42-pattern library."""
+def get_pattern_library(current_user: User = Depends(get_current_user_dep)):
+    """Return the full pattern library (auth required)."""
     return {
         "patterns": pattern_engine.get_pattern_library(),
         "stats": pattern_engine.get_stats(),

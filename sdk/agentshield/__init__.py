@@ -51,3 +51,11 @@ __all__ = [
     "RateLimitError",
     "ValidationError",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy import for langgraph subpackage."""
+    if name == "langgraph":
+        from . import langgraph
+        return langgraph
+    raise AttributeError(f"module 'agentshield' has no attribute {name!r}")

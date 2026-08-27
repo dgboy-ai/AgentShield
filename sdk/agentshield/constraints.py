@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from .auth import AuthManager
-from .exceptions import AgentShieldError, ValidationError, NotFoundError
+from .exceptions import AgentShieldError
 from .models import Constraint
 
 
@@ -38,9 +38,20 @@ class ConstraintManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return Constraint.from_dict(resp.json())
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return Constraint.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def list(
         self,
@@ -61,9 +72,20 @@ class ConstraintManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return [Constraint.from_dict(c) for c in resp.json()]
+            data = resp.json()
+            if not isinstance(data, list):
+                raise AgentShieldError(
+                    f"Expected list response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return [Constraint.from_dict(c) for c in data]
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def get(self, constraint_id: str) -> Constraint:
         """Get a single constraint by ID."""
@@ -74,9 +96,20 @@ class ConstraintManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return Constraint.from_dict(resp.json())
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return Constraint.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def update(
         self,
@@ -101,9 +134,20 @@ class ConstraintManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return Constraint.from_dict(resp.json())
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return Constraint.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def deactivate(self, constraint_id: str) -> None:
         """Deactivate (soft-delete) a constraint."""
@@ -126,9 +170,20 @@ class ConstraintManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def integrity_score(self) -> dict:
         """Get integrity score and token overhead."""
@@ -139,9 +194,20 @@ class ConstraintManager:
                 headers=self._auth_headers(),
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise AgentShieldError(
+                    f"Expected dict response, got {type(data).__name__}",
+                    status_code=None,
+                )
+            return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
+        except (httpx.JSONDecodeError, TypeError) as e:
+            raise AgentShieldError(
+                f"Malformed server response: {e}",
+                status_code=None,
+            ) from e
 
     def _require_auth(self):
         if not self._auth.token:
@@ -152,15 +218,5 @@ class ConstraintManager:
 
     @staticmethod
     def _translate_error(e: httpx.HTTPStatusError):
-        status = e.response.status_code
-        try:
-            detail = e.response.json()
-        except Exception:
-            detail = {"message": str(e)}
-        msg = detail.get("detail", str(e))
-        if status == 404:
-            raise NotFoundError(msg, status_code=status, detail=detail)
-        elif status == 422:
-            raise ValidationError(msg, status_code=status, detail=detail)
-        else:
-            raise AgentShieldError(msg, status_code=status, detail=detail)
+        from .client import translate_http_error
+        return translate_http_error(e)
