@@ -14,7 +14,8 @@ interface AuthState {
 interface AuthContextType extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, fullName: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  refresh: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -68,13 +69,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("agentshield_auth", JSON.stringify(newState));
   }, []);
 
-  const logout = useCallback(() => {
+  const refresh = useCallback(async () => {
+    try {
+      const res = await api.refresh();
+      setState((s) => {
+        if (!s.token) return s;
+        const ns = { ...s, token: res.access_token, userId: res.user_id, orgId: res.org_id };
+        localStorage.setItem("agentshield_auth", JSON.stringify({ ...ns, loading: false }));
+        return { ...ns, loading: false };
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch {}
     setState({ token: null, userId: null, orgId: null, email: null, loading: false });
     localStorage.removeItem("agentshield_auth");
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, register, logout }}>
+    <AuthContext.Provider value={{ ...state, login, register, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

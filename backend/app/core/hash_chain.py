@@ -55,7 +55,12 @@ class ChainEntry:
         self.entry_hash = self._compute_hash()
 
     def _canonical_payload(self) -> str:
-        """Canonical JSON serialization for deterministic hashing."""
+        """Canonical JSON serialization for deterministic hashing. Normalizes created_at to UTC ISO for DB round-trip determinism (SQLite loses tz)."""
+        ca = self.created_at
+        if ca.tzinfo is None:
+            ca = ca.replace(tzinfo=timezone.utc)
+        else:
+            ca = ca.astimezone(timezone.utc)
         return json.dumps(
             {
                 "entry_id": self.entry_id,
@@ -64,7 +69,7 @@ class ChainEntry:
                 "payload": self.payload,
                 "previous_hash": self.previous_hash,
                 "sequence_number": self.sequence_number,
-                "created_at": self.created_at.isoformat(),
+                "created_at": ca.isoformat(),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -167,9 +172,12 @@ class HashChainEngine:
     - Append-only: entries cannot be modified or deleted
     - Verification traverses the full chain and validates hashes
     - Daily anchoring provides external integrity proof
+    - Thread-safe via per-engine lock for multi-worker / async safety
     """
 
     def __init__(self):
+        import threading
+
         self._chains: dict[str, list[ChainEntry]] = {}
         self._sequence_counters: dict[str, int] = {}
         self._anchors: dict[str, list[AnchorRecord]] = {}
@@ -179,6 +187,7 @@ class HashChainEngine:
         self._listeners: list = []
         # incremental verify cache: org_id -> (last_len, result)
         self._verify_cache: dict[str, tuple[int, ChainVerificationResult]] = {}
+        self._lock = threading.RLock()
 
     def add_listener(self, callback):
         self._listeners.append(callback)
@@ -204,6 +213,8 @@ class HashChainEngine:
         org_id: str,
         entry_type: EntryType,
         payload: dict,
+        entry_id: Optional[str] = None,
+        created_at: Optional[datetime] = None,
     ) -> ChainEntry:
         """
         Append a new entry to the org's hash chain.
@@ -212,41 +223,45 @@ class HashChainEngine:
             org_id: Organization ID (isolated chain per org)
             entry_type: Type of entry (memory, constraint, audit, alert, signing)
             payload: The data payload to chain
+            entry_id: Optional deterministic ID (e.g. memory_id). If None, random UUID.
+            created_at: Optional timestamp (for DB replay). If None, now.
 
         Returns:
             ChainEntry with computed hash
         """
-        entry_id = str(uuid.uuid4())
-        previous_hash = self._get_last_hash(org_id)
-        sequence = self._get_next_sequence(org_id)
+        with self._lock:
+            entry_id = entry_id or str(uuid.uuid4())
+            previous_hash = self._get_last_hash(org_id)
+            sequence = self._get_next_sequence(org_id)
 
-        entry = ChainEntry(
-            entry_id=entry_id,
-            entry_type=entry_type,
-            org_id=org_id,
-            payload=payload,
-            previous_hash=previous_hash,
-            sequence_number=sequence,
-        )
+            entry = ChainEntry(
+                entry_id=entry_id,
+                entry_type=entry_type,
+                org_id=org_id,
+                payload=payload,
+                previous_hash=previous_hash,
+                sequence_number=sequence,
+                created_at=created_at,
+            )
 
-        if org_id not in self._chains:
-            self._chains[org_id] = []
-        self._chains[org_id].append(entry)
+            if org_id not in self._chains:
+                self._chains[org_id] = []
+            self._chains[org_id].append(entry)
 
-        # invalidate verify cache for this org
-        self._verify_cache.pop(org_id, None)
+            # invalidate verify cache for this org
+            self._verify_cache.pop(org_id, None)
 
-        self._emit(
-            "entry_appended",
-            {
-                "entry_id": entry_id,
-                "org_id": org_id,
-                "entry_type": entry_type.value,
-                "sequence": sequence,
-            },
-        )
+            self._emit(
+                "entry_appended",
+                {
+                    "entry_id": entry_id,
+                    "org_id": org_id,
+                    "entry_type": entry_type.value,
+                    "sequence": sequence,
+                },
+            )
 
-        return entry
+            return entry
 
     def get_entry(self, org_id: str, entry_id: str) -> Optional[ChainEntry]:
         """Get a specific entry by ID."""
@@ -282,11 +297,13 @@ class HashChainEngine:
         Verify the entire hash chain for an org.
         Cached incremental: if chain length unchanged since last verify, returns cached result O(1).
         Otherwise traverses every entry, recomputes hashes.
+        Thread-safe via lock.
         """
         import time
 
-        chain = self._chains.get(org_id, [])
-        total = len(chain)
+        with self._lock:
+            chain = list(self._chains.get(org_id, []))
+            total = len(chain)
 
         if total == 0:
             return ChainVerificationResult(
@@ -299,10 +316,20 @@ class HashChainEngine:
                 verification_time_ms=0,
             )
 
-        # cache hit: length unchanged => instant
+        # cache hit: length unchanged => instant, but must re-validate hashes
+        # to catch direct tampering (entry_hash mutated without append).
+        # We do a quick hash check before returning cached success.
         cached = self._verify_cache.get(org_id)
-        if cached and cached[0] == total:
-            return cached[1]
+        if cached and cached[0] == total and cached[1].is_valid:
+            # quick integrity check: recompute first and last hash
+            # if either mismatched, invalidate cache and do full verify
+            try:
+                if chain[0]._compute_hash() != chain[0].entry_hash or chain[-1]._compute_hash() != chain[-1].entry_hash:
+                    self._verify_cache.pop(org_id, None)
+                else:
+                    return cached[1]
+            except Exception:
+                self._verify_cache.pop(org_id, None)
 
         start = time.time()
 
@@ -450,21 +477,39 @@ class HashChainEngine:
 
     def restore_entry(self, entry: ChainEntry) -> None:
         """Restore a persisted ChainEntry without recomputing hash (for startup reload)."""
-        org_id = entry.org_id
-        if org_id not in self._chains:
-            self._chains[org_id] = []
-        self._chains[org_id].append(entry)
-        # Keep sequence counter in sync
-        current = self._sequence_counters.get(org_id, 0)
-        if entry.sequence_number > current:
-            self._sequence_counters[org_id] = entry.sequence_number
+        with self._lock:
+            org_id = entry.org_id
+            if org_id not in self._chains:
+                self._chains[org_id] = []
+            self._chains[org_id].append(entry)
+            # Keep sequence counter in sync
+            current = self._sequence_counters.get(org_id, 0)
+            if entry.sequence_number > current:
+                self._sequence_counters[org_id] = entry.sequence_number
+            # invalidate cache for this org
+            self._verify_cache.pop(org_id, None)
+
+    def pop_last(self, org_id: str) -> Optional[ChainEntry]:
+        """Remove and return the last entry for an org (for transaction rollback)."""
+        with self._lock:
+            chain = self._chains.get(org_id)
+            if not chain:
+                return None
+            entry = chain.pop()
+            # decrement sequence counter
+            current = self._sequence_counters.get(org_id, 0)
+            if current > 0:
+                self._sequence_counters[org_id] = current - 1
+            self._verify_cache.pop(org_id, None)
+            return entry
 
     def clear(self) -> None:
         """Clear all in-memory chains (used before reload)."""
-        self._chains.clear()
-        self._sequence_counters.clear()
-        self._anchors.clear()
-        self._verify_cache.clear()
+        with self._lock:
+            self._chains.clear()
+            self._sequence_counters.clear()
+            self._anchors.clear()
+            self._verify_cache.clear()
 
     def get_chain_as_jsonl(self, org_id: str) -> str:
         """Export the chain as JSONL (append-only log format)."""

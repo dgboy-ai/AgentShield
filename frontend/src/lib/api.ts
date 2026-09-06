@@ -26,6 +26,7 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     method: opts.method || "GET",
     headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
+    credentials: "include", // for httpOnly refresh/access cookies
   });
 
   if (!res.ok) {
@@ -51,15 +52,22 @@ export const api = {
 
   // Auth
   register: (email: string, password: string, full_name: string) =>
-    request<{ access_token: string; token_type: string; user_id: string; org_id: string }>(
+    request<{ access_token: string; refresh_token?: string; token_type: string; user_id: string; org_id: string; expires_in?: number }>(
       "/api/auth/register",
       { method: "POST", body: { email, password, full_name } }
     ),
   login: (email: string, password: string) =>
-    request<{ access_token: string; token_type: string; user_id: string; org_id: string }>(
+    request<{ access_token: string; refresh_token?: string; token_type: string; user_id: string; org_id: string; expires_in?: number }>(
       "/api/auth/login",
       { method: "POST", body: { email, password } }
     ),
+  refresh: () =>
+    request<{ access_token: string; refresh_token?: string; token_type: string; user_id: string; org_id: string }>(
+      "/api/auth/refresh",
+      { method: "POST" }
+    ),
+  logout: () =>
+    request<{ status: string }>("/api/auth/logout", { method: "POST" }),
   me: (token: string) =>
     request<{ user_id: string; email: string; full_name: string; org_id: string }>(
       "/api/auth/me",
@@ -113,6 +121,10 @@ export const api = {
     request<Record<string, unknown>>("/api/audit/timeline", { token }),
   auditVerify: (token: string) =>
     request<Record<string, unknown>>("/api/audit/verify", { token }),
+  auditTimeTravel: (token: string, timestamp: string) =>
+    request<Record<string, unknown>>(`/api/audit/time-travel?timestamp=${encodeURIComponent(timestamp)}`, { token }),
+  auditDbTimeTravel: (token: string, timestamp: string, table: string = "audit_log") =>
+    request<Record<string, unknown>>(`/api/audit/db-time-travel?timestamp=${encodeURIComponent(timestamp)}&table=${table}`, { token }),
   complianceReport: (token: string) =>
     request<Record<string, unknown>>("/api/audit/compliance/report", { token }),
   exportJsonl: (token: string) =>

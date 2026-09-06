@@ -30,12 +30,54 @@ def list_audit_entries(
     end_time: Optional[datetime] = Query(None),
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dep),
 ):
     org_id = str(current_user.org_id)
 
-    event_filter = EventType(event_type) if event_type else None
+    # For large logs, use DB pagination (O(1) via index) not in-memory O(N) slice.
+    # Try DB first (durable), fallback to in-memory for small/legacy.
+    try:
+        q = db.query(AuditLog).filter(AuditLog.org_id == org_id)
+        if event_type:
+            q = q.filter(AuditLog.event_type == event_type)
+        if actor:
+            q = q.filter(AuditLog.actor == actor)
+        if start_time:
+            q = q.filter(AuditLog.recorded_at >= start_time)
+        if end_time:
+            q = q.filter(AuditLog.recorded_at <= end_time)
+        total = q.count()
+        rows = q.order_by(AuditLog.recorded_at.desc()).offset(offset).limit(limit).all()
+        # If DB has data, return DB rows (more durable than in-memory)
+        if total > 0 or rows:
+            return {
+                "entries": [
+                    {
+                        "entry_id": str(r.audit_id),
+                        "org_id": str(r.org_id),
+                        "event_type": r.event_type,
+                        "actor": r.actor,
+                        "target": r.target,
+                        "action": r.action,
+                        "details": r.details,
+                        "previous_hash": r.previous_hash,
+                        "entry_hash": r.entry_hash,
+                        "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+                        "source": "db",
+                    }
+                    for r in rows
+                ],
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "source": "db",
+            }
+    except Exception:
+        pass
 
+    # Fallback to in-memory (for tests with in-memory SQLite or before DB commit)
+    event_filter = EventType(event_type) if event_type else None
     query = AuditQuery(
         org_id=org_id,
         event_type=event_filter,
@@ -45,15 +87,14 @@ def list_audit_entries(
         offset=offset,
         limit=limit,
     )
-
     entries = audit_trail.query(query)
     total = audit_trail.query_count(query)
-
     return {
         "entries": [e.to_dict() for e in entries],
         "total": total,
         "offset": offset,
         "limit": limit,
+        "source": "in_memory",
     }
 
 
@@ -81,6 +122,55 @@ def verify_audit_chain(
     return audit_trail.verify_chain(org_id)
 
 
+@router.get("/anchors")
+def list_anchors(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dep),
+):
+    """List durable chain anchors (DB + external) for this org - proves external anchoring."""
+    from app.models.chain_anchor import ChainAnchor
+
+    org_id = str(current_user.org_id)
+    try:
+        rows = (
+            db.query(ChainAnchor)
+            .filter(ChainAnchor.org_id == org_id)
+            .order_by(ChainAnchor.created_at.desc())
+            .limit(100)
+            .all()
+        )
+        return {
+            "org_id": org_id,
+            "total": len(rows),
+            "anchors": [
+                {
+                    "anchor_id": str(r.anchor_id),
+                    "chain_type": r.chain_type,
+                    "chain_head_hash": r.chain_head_hash,
+                    "chain_length": r.chain_length,
+                    "anchor_target": r.anchor_target,
+                    "external_ref": r.external_ref,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ],
+        }
+    except Exception as e:
+        # Table may not exist if migration not yet applied (dev with old DB)
+        return {"org_id": org_id, "total": 0, "anchors": [], "note": f"anchors table not yet migrated: {e}"}
+
+
+@router.post("/anchors/trigger")
+def trigger_anchor(
+    current_user: User = Depends(get_current_user_dep),
+):
+    """Manually trigger anchoring for this org (for demo/testing)."""
+    from app.main import anchor_hashes_job
+
+    anchor_hashes_job()
+    return {"status": "anchored", "org_id": str(current_user.org_id)}
+
+
 @router.get("/time-travel")
 def time_travel_query(
     timestamp: datetime = Query(..., description="ISO8601 timestamp for AS OF SYSTEM TIME"),
@@ -105,24 +195,22 @@ def time_travel_query(
     mem_ids = {e.entry_id for e in mem_entries}
 
     # 2. DB-backed query for persistence across restarts
-    # For CockroachDB, we use AS OF SYSTEM TIME to get historical snapshot
+    # For CockroachDB, we use AS OF SYSTEM TIME to get historical snapshot (true MVCC, no lock)
     db_entries = []
     try:
         if _is_cockroach:
-            # CockroachDB AS OF SYSTEM TIME — true time-travel
-            # Query audit_log as of timestamp
-            # Note: AS OF SYSTEM TIME expects interval or timestamp string
-            ts_str = timestamp.isoformat()
-            # Use parameterized query with AS OF SYSTEM TIME clause
-            # Fallback gracefully if not supported
+            # CockroachDB AS OF SYSTEM TIME requires timestamp literal, not bound parameter for AS OF clause
+            # Use string interpolation for AS OF, parameterized for WHERE (safe, org_id is UUID)
+            ts_literal = timestamp.astimezone(timezone.utc).isoformat().replace("'", "''")
+            # Use literal for AS OF, keep WHERE parameterized
             result = db.execute(
                 sql_text(
-                    "SELECT audit_id, org_id, event_type, actor, target, action, details, recorded_at "
-                    "FROM audit_log AS OF SYSTEM TIME :ts "
-                    "WHERE org_id = :org_id AND recorded_at <= :ts2 "
-                    "ORDER BY recorded_at ASC"
+                    f"SELECT audit_id, org_id, event_type, actor, target, action, details, recorded_at "
+                    f"FROM audit_log AS OF SYSTEM TIME '{ts_literal}' "
+                    f"WHERE org_id = :org_id AND recorded_at <= :ts2 "
+                    f"ORDER BY recorded_at ASC"
                 ),
-                {"ts": ts_str, "org_id": org_id, "ts2": timestamp},
+                {"org_id": org_id, "ts2": timestamp},
             ).fetchall()
             db_entries = [
                 {
@@ -234,9 +322,10 @@ def db_time_travel_query(
 
     try:
         if _is_cockroach:
+            ts_literal = timestamp.astimezone(timezone.utc).isoformat().replace("'", "''")
             rows = db.execute(
-                sql_text(f"SELECT * FROM {table} AS OF SYSTEM TIME :ts WHERE org_id = :org_id AND {time_col} <= :ts2 ORDER BY {time_col} ASC"),
-                {"ts": timestamp.isoformat(), "org_id": org_id, "ts2": timestamp},
+                sql_text(f"SELECT * FROM {table} AS OF SYSTEM TIME '{ts_literal}' WHERE org_id = :org_id AND {time_col} <= :ts2 ORDER BY {time_col} ASC"),
+                {"org_id": org_id, "ts2": timestamp},
             ).fetchall()
             # Return raw count for demo
             return {

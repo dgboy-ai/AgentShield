@@ -40,7 +40,10 @@ from cryptography.hazmat.primitives.serialization import (
 from cryptography.exceptions import InvalidSignature
 
 _SIGNING_KEY_DIR = Path(os.path.expanduser("~/.agentshield"))
-_SIGNING_KEY_FILE = _SIGNING_KEY_DIR / "signing_key.pem"
+_SIGNING_KEY_FILE = Path(os.getenv("SIGNING_KEY_FILE", str(_SIGNING_KEY_DIR / "signing_key.pem")))
+# Optional persistent PEM via env (for Render/ephemeral FS): set SIGNING_PRIVATE_KEY to PEM string or base64-encoded PEM
+_SIGNING_PRIVATE_KEY_ENV = os.getenv("SIGNING_PRIVATE_KEY", "").strip()
+_SIGNING_PRIVATE_KEY_B64_ENV = os.getenv("SIGNING_PRIVATE_KEY_B64", "").strip()
 
 
 class SigningBackend(str, Enum):
@@ -145,6 +148,7 @@ class SigningEngine:
         elif env_backend == "local":
             backend = SigningBackend.LOCAL
         self.backend = backend
+        self._requested_backend = backend  # remember what was requested
         self._private_key: Optional[EllipticCurvePrivateKey] = None
         self._public_key: Optional[EllipticCurvePublicKey] = None
         self._key_id: str = ""
@@ -152,6 +156,8 @@ class SigningEngine:
         self._verify_count = 0
         self._listeners: list = []
         self._kms_client = None  # boto3 client when KMS enabled
+        self._fallback = False
+        self._fallback_reason: Optional[str] = None
 
         self._initialize_backend()
 
@@ -166,15 +172,17 @@ class SigningEngine:
             self._init_kms_backend()
 
     def _init_kms_backend(self):
-        """Initialize AWS KMS backend. Falls back to LOCAL if AWS not configured."""
+        """Initialize AWS KMS backend. Falls back to LOCAL only with explicit fallback flag (no silent downgrade)."""
         kms_key_id = os.getenv("AWS_KMS_KEY_ID", "")
         aws_region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
         if not kms_key_id:
-            # No KMS key configured — fall back to local with warning, do NOT crash
+            # No KMS key configured — fall back to local with explicit error, do NOT crash but mark fallback
             import logging
-            logging.getLogger("agentshield.signing").warning(
-                "AWS_KMS backend requested but AWS_KMS_KEY_ID not set — falling back to LOCAL. "
-                "Set AWS_KMS_KEY_ID and AWS credentials to enable real KMS signing."
+            self._fallback = True
+            self._fallback_reason = "AWS_KMS_KEY_ID not set"
+            logging.getLogger("agentshield.signing").error(
+                "AWS_KMS backend requested but AWS_KMS_KEY_ID not set — FALLING BACK to LOCAL (insecure, ephemeral). "
+                "Set AWS_KMS_KEY_ID and AWS credentials to enable real KMS signing. Fallback flag set."
             )
             self.backend = SigningBackend.LOCAL
             self._private_key, self._public_key = self._load_or_generate_key()
@@ -195,14 +203,17 @@ class SigningEngine:
             # pub_resp["PublicKey"] is DER-encoded SubjectPublicKeyInfo
             self._public_key = serialization.load_der_public_key(pub_resp["PublicKey"])
             self._private_key = None  # Private key never leaves KMS
+            self._fallback = False
             import logging
             logging.getLogger("agentshield.signing").info(
                 "AWS KMS backend initialized: key_id=%s region=%s", self._key_id, aws_region
             )
         except ImportError:
             import logging
-            logging.getLogger("agentshield.signing").warning(
-                "boto3 not installed — cannot use AWS KMS. Falling back to LOCAL. pip install boto3"
+            self._fallback = True
+            self._fallback_reason = "boto3 not installed"
+            logging.getLogger("agentshield.signing").error(
+                "boto3 not installed — cannot use AWS KMS. FALLING BACK to LOCAL (insecure). pip install boto3"
             )
             self.backend = SigningBackend.LOCAL
             self._private_key, self._public_key = self._load_or_generate_key()
@@ -212,8 +223,10 @@ class SigningEngine:
             self._key_id = hashlib.sha256(pub_bytes).hexdigest()[:16]
         except Exception as e:
             import logging
-            logging.getLogger("agentshield.signing").warning(
-                "AWS KMS init failed (%s) — falling back to LOCAL", e
+            self._fallback = True
+            self._fallback_reason = str(e)
+            logging.getLogger("agentshield.signing").error(
+                "AWS KMS init failed (%s) — FALLING BACK to LOCAL (insecure)", e
             )
             self.backend = SigningBackend.LOCAL
             self._private_key, self._public_key = self._load_or_generate_key()
@@ -223,10 +236,47 @@ class SigningEngine:
             self._key_id = hashlib.sha256(pub_bytes).hexdigest()[:16]
 
     def _load_or_generate_key(self) -> tuple[EllipticCurvePrivateKey, EllipticCurvePublicKey]:
-        """Load existing key from disk, or generate and persist a new one."""
-        if _SIGNING_KEY_FILE.exists():
+        """Load existing key from disk/env, or generate and persist a new one.
+
+        Priority:
+          1. SIGNING_PRIVATE_KEY_B64 (base64-encoded PEM) or SIGNING_PRIVATE_KEY (raw PEM) env var - for Render/ephemeral FS
+          2. File at SIGNING_KEY_FILE (or ~/.agentshield/signing_key.pem)
+          3. Generate new and try to persist (ephemeral if persist fails)
+        """
+        # 1. Env var (persistent, survives deploys) - check at runtime
+        env_pem_b64 = os.getenv("SIGNING_PRIVATE_KEY_B64", "").strip()
+        env_pem = os.getenv("SIGNING_PRIVATE_KEY", "").strip()
+        # Also check import-time cached but allow override
+        if not env_pem_b64:
+            env_pem_b64 = _SIGNING_PRIVATE_KEY_B64_ENV
+        if not env_pem:
+            env_pem = _SIGNING_PRIVATE_KEY_ENV
+        for pem_str in [env_pem_b64, env_pem]:
+            if pem_str:
+                try:
+                    # If base64, decode
+                    if pem_str.strip().startswith("-----BEGIN"):
+                        pem_data = pem_str.encode()
+                    else:
+                        # try base64 decode
+                        try:
+                            pem_data = base64.b64decode(pem_str)
+                        except Exception:
+                            pem_data = pem_str.encode()
+                    private_key = serialization.load_pem_private_key(pem_data, password=None)
+                    if isinstance(private_key, EllipticCurvePrivateKey):
+                        import logging
+                        logging.getLogger("agentshield.signing").info("Loaded signing key from env var (persistent)")
+                        return private_key, private_key.public_key()
+                except Exception as e:
+                    import logging
+                    logging.getLogger("agentshield.signing").warning(f"Failed to load SIGNING_PRIVATE_KEY from env: {e} - trying file")
+
+        # 2. File (check env override for path)
+        signing_key_file = Path(os.getenv("SIGNING_KEY_FILE", str(_SIGNING_KEY_FILE)))
+        if signing_key_file.exists():
             try:
-                pem_data = _SIGNING_KEY_FILE.read_bytes()
+                pem_data = signing_key_file.read_bytes()
                 private_key = serialization.load_pem_private_key(pem_data, password=None)
                 if isinstance(private_key, EllipticCurvePrivateKey):
                     return private_key, private_key.public_key()
@@ -234,16 +284,23 @@ class SigningEngine:
                 pass  # Corrupt key — regenerate
 
         private_key = ec.generate_private_key(SECP256R1())
+        # 3. Try to persist
         try:
-            _SIGNING_KEY_DIR.mkdir(parents=True, exist_ok=True)
+            # Use env path if set, else default
+            key_dir = signing_key_file.parent
+            key_dir.mkdir(parents=True, exist_ok=True)
             pem = private_key.private_bytes(
                 Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
             )
-            tmp = str(_SIGNING_KEY_FILE) + ".tmp"
+            tmp = str(signing_key_file) + ".tmp"
             with open(tmp, "wb") as f:
                 f.write(pem)
-            os.replace(tmp, str(_SIGNING_KEY_FILE))
-            os.chmod(str(_SIGNING_KEY_FILE), 0o600)
+            os.replace(tmp, str(signing_key_file))
+            os.chmod(str(signing_key_file), 0o600)
+            import logging
+            logging.getLogger("agentshield.signing").warning(
+                "Generated new ephemeral signing key at %s - set SIGNING_PRIVATE_KEY env var for persistence across deploys", signing_key_file
+            )
         except OSError:
             pass  # Non-fatal — key works in-memory, just won't survive restart
         return private_key, private_key.public_key()
@@ -381,21 +438,14 @@ class SigningEngine:
                 )
             elif self.backend == SigningBackend.AWS_KMS:
                 kms_key_id = os.getenv("AWS_KMS_KEY_ID", "")
-                try:
-                    self._kms_client.verify(
-                        KeyId=kms_key_id,
-                        Message=message_bytes,
-                        MessageType="RAW",
-                        SigningAlgorithm="ECDSA_SHA_256",
-                        Signature=signature_bytes,
-                    )
-                except Exception:
-                    # Fallback: local verify with cached public key (for offline verify)
-                    self._public_key.verify(
-                        signature_bytes,
-                        message_bytes,
-                        ec.ECDSA(hashes.SHA256()),
-                    )
+                # No fallback to local - HSM must verify, otherwise fail (prevents downgrade attack)
+                self._kms_client.verify(
+                    KeyId=kms_key_id,
+                    Message=message_bytes,
+                    MessageType="RAW",
+                    SigningAlgorithm="ECDSA_SHA_256",
+                    Signature=signature_bytes,
+                )
 
             self._verify_count += 1
 
@@ -502,7 +552,11 @@ class SigningEngine:
     def get_stats(self) -> dict:
         return {
             "backend": self.backend.value,
+            "requested_backend": getattr(self, "_requested_backend", self.backend).value if hasattr(self, "_requested_backend") else self.backend.value,
             "key_id": self._key_id,
             "total_signs": self._sign_count,
             "total_verifies": self._verify_count,
+            "fallback": getattr(self, "_fallback", False),
+            "fallback_reason": getattr(self, "_fallback_reason", None),
+            "persistent": bool(os.getenv("SIGNING_PRIVATE_KEY") or os.getenv("SIGNING_PRIVATE_KEY_B64") or Path(os.getenv("SIGNING_KEY_FILE", str(_SIGNING_KEY_FILE))).exists()),
         }

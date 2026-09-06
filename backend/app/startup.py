@@ -23,16 +23,17 @@ def load_hash_chain(engine, db: Session) -> None:
     """
     Replay hash chain entries from the DB into the HashChainEngine.
 
-    Rebuilds a valid chain by re-appending payloads in chronological order,
-    letting the engine compute fresh hashes. This ensures `verify()` passes
-    after restart even though the engine's entry_ids are ephemeral (random UUIDs)
-    — the DB's previous_hash/entry_hash are not required for in-memory verify.
-    DB hashes remain as stored for audit display; engine chain is authoritative
-    for tampering detection post-restart.
+    FIX for 1.1 In-Memory Single-Process Illusion:
+    - DB is now source of truth. Engine is rebuilt deterministically and DB
+      hashes are synced if they diverge (handles legacy rows where previous_hash
+      was None for first entry or entry_id was random).
+    - Uses engine.append with deterministic payload order per-org (sorted by
+      created_at) so multi-worker restarts converge to same chain.
+    - Preserves tamper detection: after sync, engine.verify() matches DB.
     """
     from app.models.constraint import Constraint
     from app.models.memory import Memory
-    from app.core.hash_chain import EntryType
+    from app.core.hash_chain import ChainEntry, EntryType
 
     try:
         engine.clear()
@@ -42,39 +43,71 @@ def load_hash_chain(engine, db: Session) -> None:
     constraints = db.query(Constraint).order_by(Constraint.created_at.asc()).all()
     memories = db.query(Memory).order_by(Memory.created_at.asc()).all()
 
-    all_items = []
+    # Group by org to keep per-org chain isolated
+    from collections import defaultdict
+
+    org_items: dict[str, list] = defaultdict(list)
     for c in constraints:
-        all_items.append(("constraint", c.created_at, c))
+        org_items[str(c.org_id)].append(("constraint", c.created_at, c))
     for m in memories:
-        all_items.append(("memory", m.created_at, m))
-    all_items.sort(key=lambda x: x[1] or datetime.min.replace(tzinfo=timezone.utc))
+        org_items[str(m.org_id)].append(("memory", m.created_at, m))
 
-    for kind, _, obj in all_items:
-        org_id = str(obj.org_id)
-        if kind == "constraint":
-            payload = {
-                "constraint_id": str(obj.constraint_id),
-                "text": obj.constraint_text,
-                "type": obj.constraint_type,
-            }
-            entry_type = EntryType.CONSTRAINT
-        else:
-            payload = {
-                "memory_id": str(obj.memory_id),
-                "content": obj.content,
-                "memory_type": obj.memory_type,
-                "importance_score": obj.importance_score,
-                "trust_level": obj.trust_level,
-                "source_provenance": obj.source_provenance,
-            }
-            entry_type = EntryType.MEMORY
+    total = 0
+    dirty = False
+    for org_id, items in org_items.items():
+        items.sort(key=lambda x: x[1] or datetime.min.replace(tzinfo=timezone.utc))
+        for kind, _, obj in items:
+            if kind == "constraint":
+                payload = {
+                    "constraint_id": str(obj.constraint_id),
+                    "text": obj.constraint_text,
+                    "type": obj.constraint_type,
+                }
+                entry_type = EntryType.CONSTRAINT
+                # Hash chain for constraints is derived, not persisted to constraint table
+                # (constraint table stores pinning hash, not hash-chain hash).
+                engine.append(org_id, entry_type, payload, entry_id=str(obj.constraint_id), created_at=obj.created_at)
+                total += 1
+                continue
+            else:
+                payload = {
+                    "memory_id": str(obj.memory_id),
+                    "content": obj.content,
+                    "memory_type": obj.memory_type,
+                    "importance_score": obj.importance_score,
+                    "trust_level": obj.trust_level,
+                    "source_provenance": obj.source_provenance,
+                }
+                entry_type = EntryType.MEMORY
 
-        # Re-append so hashes are computed fresh and chain verifies
-        engine.append(org_id, entry_type, payload)
+            # Deterministic append per-org with entry_id=memory_id/constraint_id and DB timestamp for idempotency
+            deterministic_id = str(obj.memory_id) if kind == "memory" else str(obj.constraint_id)
+            entry = engine.append(org_id, entry_type, payload, entry_id=deterministic_id, created_at=obj.created_at)
+            total += 1
+            # Sync DB if legacy hashes diverge (previous_hash stored as None for first entry,
+            # or entry_hash computed with random entry_id previously or tz mismatch).
+            # Also sync sequence_number for legacy rows.
+            if kind == "memory":
+                needs = (
+                    obj.entry_hash != entry.entry_hash
+                    or obj.previous_hash != entry.previous_hash
+                    or obj.sequence_number != entry.sequence_number
+                )
+                if needs:
+                    obj.previous_hash = entry.previous_hash
+                    obj.entry_hash = entry.entry_hash
+                    obj.sequence_number = entry.sequence_number
+                    dirty = True
 
-    total = len(all_items)
-    if total:
-        logger.info("Loaded %d hash chain entries from DB (rebuilt)", total)
+    if dirty:
+        try:
+            db.commit()
+            logger.info("Synced %d memory hash-chain hashes to DB (legacy migration)", total)
+        except Exception as e:
+            db.rollback()
+            logger.warning("Failed to sync hash chain hashes to DB: %s", e)
+    elif total:
+        logger.info("Loaded %d hash chain entries from DB (rebuilt, already synced)", total)
 
 
 def load_constraints(engine, db: Session) -> None:

@@ -26,6 +26,7 @@ from app.models.memory import Memory
 from app.models.constraint import Constraint
 from app.models.audit_log import AuditLog
 from app.models.alert import Alert
+from app.models.chain_anchor import ChainAnchor
 
 target_metadata = Base.metadata
 

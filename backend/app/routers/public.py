@@ -25,7 +25,7 @@ from app.models.database import get_db, SessionLocal
 from app.models.organization import Organization
 from app.models.constraint import Constraint as ConstraintDB
 from app.models.memory import Memory as MemoryDB
-from app.core.pattern_detection import PatternDetectionEngine
+from app.core.pattern_detection import shared_engine as _pattern_engine
 from app.core.audit_trail import AuditQuery, EventType
 
 # Import shared in-memory engines (same instances constraints.py uses)
@@ -37,7 +37,7 @@ except Exception:
 
 router = APIRouter(prefix="/api/public", tags=["public-demo"])
 
-_pattern_engine = PatternDetectionEngine()
+# _pattern_engine is now shared singleton (imported above) - no separate instance
 
 
 def _resolve_demo_org_id(db: Session) -> Optional[str]:

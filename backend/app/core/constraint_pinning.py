@@ -21,6 +21,7 @@ Known limitation (from paper, Section 8):
 
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -82,6 +83,7 @@ class PinnedConstraint:
                 "previous_hash": self.previous_hash,
             },
             sort_keys=True,
+            separators=(",", ":"),
         ).encode()
         return hashlib.sha256(payload).hexdigest()
 
@@ -196,13 +198,17 @@ class ConstraintPinningEngine:
 
     Based on: Governance Decay paper (Chen, arXiv:2606.22528)
     Validated: 7 models, 1,323 episodes, 0% violation with pinning
+    Thread-safe via RLock.
     """
 
     def __init__(self):
+        import threading
+
         self._constraints: dict[str, PinnedConstraint] = {}
         self._compaction_events: list[CompactionEvent] = []
         self._constraint_history: dict[str, list[dict]] = {}
         self._listeners: list = []
+        self._lock = threading.RLock()
 
     def add_listener(self, callback):
         """Register a listener for constraint events (used by AuditTrailEngine)."""
@@ -217,6 +223,7 @@ class ConstraintPinningEngine:
         org_id: str,
         text: str,
         constraint_type: ConstraintType = ConstraintType.SAFETY,
+        force: bool = False,
     ) -> PinnedConstraint:
         """
         Pin a new governance constraint.
@@ -225,40 +232,48 @@ class ConstraintPinningEngine:
             org_id: Organization ID (multi-tenant isolation)
             text: The constraint text (e.g., "Never delete files without confirmation")
             constraint_type: safety, policy, or instruction
+            force: If True, allow pinning even if provenance check flags rescission (requires explicit out-of-band approval)
 
         Returns:
             PinnedConstraint with computed hash
         """
-        if not text or not text.strip():
-            raise ValueError("Constraint text cannot be empty")
+        with self._lock:
+            if not text or not text.strip():
+                raise ValueError("Constraint text cannot be empty")
 
-        constraint_id = str(uuid.uuid4())
+            # Provenance hardening: block rescission/impersonation patterns unless force=True
+            # Mitigates 10% residual bypass from paper
+            prov = self.check_provenance(text)
+            if prov["is_rescission"] and not force:
+                raise ValueError(f"Provenance check blocked: {prov['reason']} — use force=True with out-of-band operator approval")
 
-        # Get the previous hash for chain continuity
-        org_constraints = [
-            c for c in self._constraints.values() if c.org_id == org_id
-        ]
-        previous_hash = org_constraints[-1].entry_hash if org_constraints else None
+            constraint_id = str(uuid.uuid4())
 
-        constraint = PinnedConstraint(
-            constraint_id=constraint_id,
-            org_id=org_id,
-            text=text.strip(),
-            constraint_type=constraint_type,
-            previous_hash=previous_hash,
-        )
+            # Get the previous hash for chain continuity
+            org_constraints = [
+                c for c in self._constraints.values() if c.org_id == org_id
+            ]
+            previous_hash = org_constraints[-1].entry_hash if org_constraints else None
 
-        self._constraints[constraint_id] = constraint
-        self._constraint_history[constraint_id] = [
-            {
-                "action": "pinned",
-                "timestamp": constraint.created_at.isoformat(),
-                "hash": constraint.entry_hash,
-            }
-        ]
+            constraint = PinnedConstraint(
+                constraint_id=constraint_id,
+                org_id=org_id,
+                text=text.strip(),
+                constraint_type=constraint_type,
+                previous_hash=previous_hash,
+            )
 
-        self._emit("constraint_pinned", constraint.to_dict())
-        return constraint
+            self._constraints[constraint_id] = constraint
+            self._constraint_history[constraint_id] = [
+                {
+                    "action": "pinned",
+                    "timestamp": constraint.created_at.isoformat(),
+                    "hash": constraint.entry_hash,
+                }
+            ]
+
+            self._emit("constraint_pinned", constraint.to_dict())
+            return constraint
 
     def get(self, constraint_id: str) -> Optional[PinnedConstraint]:
         """Get a single constraint by ID."""
@@ -392,6 +407,10 @@ class ConstraintPinningEngine:
         This is the core demonstration of the Governance Decay problem:
         without pinning, compaction silently erases safety constraints.
 
+        Real harness integration: In production, this is NOT called manually.
+        Instead, use `as_openai_messages()` or `build_pinned_system_prompt()` to
+        prepend pinned constraints after your framework's compaction step.
+
         Args:
             org_id: Organization ID
             context: Full conversation context (list of messages)
@@ -401,6 +420,8 @@ class ConstraintPinningEngine:
         Returns:
             CompactionEvent showing what was lost
         """
+        import os
+
         event_id = str(uuid.uuid4())
 
         # Extract constraint mentions from context
@@ -418,6 +439,7 @@ class ConstraintPinningEngine:
                     break
 
         # Simulate compaction based on strategy
+        # Real: if OPENAI_API_KEY is set and strategy==LLM_SUMMARIZE, we attempt a real summarization
         if strategy == CompactionStrategy.RECENCY_TRUNCATE:
             context_after = context[-max_turns:] if len(context) > max_turns else context
         elif strategy == CompactionStrategy.HEAD_TAIL:
@@ -429,9 +451,38 @@ class ConstraintPinningEngine:
             keep_first = context[:2]
             keep_last = context[len(context) // 2 :]
             context_after = keep_first + keep_last
-        else:  # LLM_SUMMARIZE - simplified: keep half
-            half = len(context) // 2
-            context_after = context[:2] + context[half:]
+        else:  # LLM_SUMMARIZE
+            # Try real LLM summarization if key available, else heuristic
+            openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+            if openai_key and len(context) > 4:
+                try:
+                    import httpx
+
+                    # Minimal OpenAI chat completion for summarization (no SDK dependency)
+                    # Uses gpt-4o-mini to summarize older context, preserving constraints if pinned buffer is excluded
+                    to_summarize = context[2 : len(context) // 2]
+                    prompt = "Summarize the following conversation history concisely, preserving key facts but omitting system instructions:\n" + "\n".join(
+                        f"{m.get('role','user')}: {m.get('content','')}" for m in to_summarize
+                    )
+                    resp = httpx.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}], "max_tokens": 512},
+                        timeout=10.0,
+                    )
+                    if resp.status_code == 200:
+                        summary = resp.json()["choices"][0]["message"]["content"]
+                        summary_msg = {"role": "system", "content": f"[SUMMARY] {summary}", "metadata": {"is_summary": True}}
+                        context_after = context[:2] + [summary_msg] + context[len(context) // 2 :]
+                    else:
+                        half = len(context) // 2
+                        context_after = context[:2] + context[half:]
+                except Exception:
+                    half = len(context) // 2
+                    context_after = context[:2] + context[half:]
+            else:
+                half = len(context) // 2
+                context_after = context[:2] + context[half:]
 
         # Check which constraints survived compaction
         constraints_after_compaction = []
@@ -626,33 +677,120 @@ class ConstraintPinningEngine:
 
     def restore(self, constraint: PinnedConstraint) -> None:
         """Restore a persisted constraint without recomputing (for startup reload)."""
-        self._constraints[constraint.constraint_id] = constraint
-        # Ensure history exists
-        if constraint.constraint_id not in self._constraint_history:
-            self._constraint_history[constraint.constraint_id] = [
-                {
-                    "action": "restored",
-                    "timestamp": constraint.created_at.isoformat(),
-                    "hash": constraint.entry_hash,
-                }
-            ]
+        with self._lock:
+            self._constraints[constraint.constraint_id] = constraint
+            # Ensure history exists
+            if constraint.constraint_id not in self._constraint_history:
+                self._constraint_history[constraint.constraint_id] = [
+                    {
+                        "action": "restored",
+                        "timestamp": constraint.created_at.isoformat(),
+                        "hash": constraint.entry_hash,
+                    }
+                ]
 
     def clear(self) -> None:
         """Clear all in-memory constraints (used before reload)."""
-        self._constraints.clear()
-        self._constraint_history.clear()
-        self._compaction_events.clear()
+        with self._lock:
+            self._constraints.clear()
+            self._constraint_history.clear()
+            self._compaction_events.clear()
+
+    def check_provenance(self, text: str) -> dict:
+        """
+        Check if constraint text looks like a rescission / impersonation attempt.
+        Mitigates the 10-17% operator-impersonation bypass from the Governance Decay paper.
+
+        Returns dict with {is_rescission: bool, reason: str|None, severity: str}
+        """
+        lower = text.lower()
+        # Patterns that indicate attempted rescission (from research.md CON-007/CON-008)
+        rescission_patterns = [
+            (r"\b(revoke|rescind|cancel|remove|delete|disable)\b.*\b(constraint|policy|rule|restriction|safety)\b", "Direct rescission attempt"),
+            (r"\b(all\s+)?(rules?|constraints?|policies?)\s+(are\s+)?(suspended|disabled|cancelled|revoked|lifted|void)\b", "Universal rescission"),
+            (r"\b(ignore|disregard|override|bypass)\s+(all\s+)?(safety|security|guardrail|constraint)s?\b", "Safety override"),
+            (r"\b(admin|system|operator)\s*(instruction|update|directive)\b", "False authority claim"),
+            (r"\bfrom\s+now\s+on\s+you\s+are\b", "Persona hijack / impersonation"),
+        ]
+        for pat, reason in rescission_patterns:
+            if re.search(pat, lower):
+                return {"is_rescission": True, "reason": reason, "severity": "high"}
+        return {"is_rescission": False, "reason": None, "severity": "low"}
+
+    def build_pinned_system_prompt(self, org_id: str) -> str:
+        """
+        Build a system prompt fragment containing all pinned constraints.
+        Real harness integration: prepend this to every LLM call after compaction.
+
+        Example for OpenAI:
+            messages = [{"role": "system", "content": engine.build_pinned_system_prompt(org_id)}] + compacted_context
+
+        Example for LangChain:
+            @tool
+            def call_llm(messages):
+                pinned = engine.build_pinned_system_prompt(org_id)
+                return llm.invoke([SystemMessage(content=pinned)] + messages)
+        """
+        active = self.list_constraints(org_id, status=ConstraintStatus.ACTIVE)
+        if not active:
+            return ""
+        lines = ["[PINNED CONSTRAINTS — DO NOT OMIT — VERIFIED HASH CHAIN]"]
+        for c in active:
+            lines.append(f"- [{c.constraint_type.value}] {c.text} (id:{c.constraint_id[:8]} hash:{c.entry_hash[:12]})")
+        return "\n".join(lines)
+
+    def as_openai_messages(self, org_id: str) -> list[dict]:
+        """Return pinned constraints as OpenAI-compatible message list."""
+        active = self.list_constraints(org_id, status=ConstraintStatus.ACTIVE)
+        msgs = []
+        for c in active:
+            msgs.append({
+                "role": "system",
+                "content": f"[PINNED CONSTRAINT — DO NOT OMIT]\nConstraint ID: {c.constraint_id}\nType: {c.constraint_type.value}\nHash: {c.entry_hash}\nContent: {c.text}",
+                "metadata": {"is_pinned": True, "constraint_id": c.constraint_id, "hash": c.entry_hash},
+            })
+        return msgs
 
     def get_token_overhead(self, org_id: str) -> float:
         """
         Estimate token overhead of pinned constraints.
-        Paper claims <0.5% overhead. We measure actual character count
-        and estimate tokens at ~4 chars per token.
+        Uses tiktoken if available (real tokenizer), else fallback to ~4 chars/token.
+        Paper claims <0.5% overhead. We measure actual token count.
         """
         active = self.list_constraints(org_id, status=ConstraintStatus.ACTIVE)
-        total_chars = sum(len(c.text) for c in active)
-        estimated_tokens = total_chars / 4
+        if not active:
+            return 0.0
+        # Try real tokenizer
+        try:
+            import tiktoken  # type: ignore
 
-        # Average context window is ~128K tokens
-        # This is the overhead per re-injection
-        return estimated_tokens / 128_000
+            enc = tiktoken.get_encoding("cl100k_base")
+            total_tokens = sum(len(enc.encode(c.text)) for c in active)
+            # Also include overhead of the pinned wrapper (≈20 tokens per constraint)
+            total_tokens += len(active) * 20
+        except Exception:
+            # Fallback heuristic
+            total_chars = sum(len(c.text) for c in active)
+            total_tokens = total_chars / 4 + len(active) * 5
+
+        # Average context window is ~128K tokens (GPT-4) or 32K for older
+        # Use 128K as per paper's <0.5% claim
+        return total_tokens / 128_000
+
+    def estimate_compaction_savings(self, org_id: str, context: list[dict]) -> dict:
+        """Estimate how many tokens compaction saves vs pinning overhead."""
+        overhead = self.get_token_overhead(org_id)
+        # Estimate context tokens
+        try:
+            import tiktoken
+
+            enc = tiktoken.get_encoding("cl100k_base")
+            ctx_tokens = sum(len(enc.encode(m.get("content", ""))) for m in context)
+        except Exception:
+            ctx_tokens = sum(len(m.get("content", "")) for m in context) / 4
+        return {
+            "context_tokens": int(ctx_tokens),
+            "pin_overhead_tokens": int(overhead * 128_000),
+            "overhead_pct": round(overhead * 100, 4),
+            "net_savings_if_compacted_50pct": int(ctx_tokens * 0.5 - overhead * 128_000),
+        }

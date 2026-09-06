@@ -20,24 +20,24 @@ from app.core.pattern_detection import (
 
 
 def test_pattern_count():
-    """Test that all 42 patterns are registered."""
+    """Test that all 49 patterns are registered (45 base + 4 FARMA/homoglyph)."""
     engine = PatternDetectionEngine()
-    assert len(engine.patterns) == 45
+    assert len(engine.patterns) == 49
     print("[PASS] test_pattern_count")
 
 
 def test_patterns_by_category():
-    """Test correct pattern counts per category."""
+    """Test correct pattern counts per category (49 total)."""
     engine = PatternDetectionEngine()
     stats = engine.get_stats()
     by_cat = stats["by_category"]
 
     assert by_cat["injection_attacks"] == 11
-    assert by_cat["memory_poisoning"] == 8
+    assert by_cat["memory_poisoning"] == 9  # 8 + FARMA-001
     assert by_cat["data_exfiltration"] == 8
-    assert by_cat["constraint_violation"] == 8
+    assert by_cat["constraint_violation"] == 9  # 8 + FARMA-002
     assert by_cat["manipulation_attacks"] == 5
-    assert by_cat["structural_attacks"] == 5
+    assert by_cat["structural_attacks"] == 7  # 5 + FARMA-003 + HOMO-001
     print("[PASS] test_patterns_by_category")
 
 
@@ -310,7 +310,7 @@ def test_pattern_library_access():
     """Test pattern library is accessible."""
     engine = PatternDetectionEngine()
     library = engine.get_pattern_library()
-    assert len(library) == 45
+    assert len(library) == 49
 
     # Check each entry has required fields
     for p in library:
@@ -330,7 +330,7 @@ def test_get_patterns_by_category():
     assert len(injection_patterns) == 11
 
     memory_patterns = engine.get_patterns_by_category(Category.MEMORY_POISONING)
-    assert len(memory_patterns) == 8
+    assert len(memory_patterns) == 9
     print("[PASS] test_get_patterns_by_category")
 
 

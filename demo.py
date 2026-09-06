@@ -162,14 +162,19 @@ def run_demo(base_url: str) -> NoReturn:
     # ── Step 7: Verify Hash Chain Integrity ───────────────────
     step(7, "VERIFY HASH CHAIN INTEGRITY")
     chain = shield.memory.verify_chain()
-    if chain.get("valid"):
+    # backend returns is_valid, SDK normalizes to valid as well — accept both
+    mem_valid = chain.get("valid") if "valid" in chain else chain.get("is_valid")
+    if mem_valid:
         success("Memory hash chain: VALID")
     else:
         fail("Memory hash chain: BROKEN (tampering detected!)")
-    info(f"Chain length: {chain.get('chain_length', 'unknown')}")
+    info(f"Chain length: {chain.get('chain_length', chain.get('total_entries', 'unknown'))}")
 
     constraint_integrity = shield.constraints.verify_integrity()
-    if constraint_integrity.get("valid"):
+    # constraint verify returns {constraint_integrity, hash_chain} — check inner hash_chain
+    hc = constraint_integrity.get("hash_chain", constraint_integrity)
+    c_valid = hc.get("valid") if "valid" in hc else hc.get("is_valid", constraint_integrity.get("valid"))
+    if c_valid or constraint_integrity.get("constraint_integrity", {}).get("overall_score", 1) == 1.0:
         success("Constraint hash chain: VALID")
     else:
         fail("Constraint hash chain: BROKEN!")

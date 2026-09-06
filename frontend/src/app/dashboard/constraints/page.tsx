@@ -28,14 +28,19 @@ export default function ConstraintsPage() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [integrity, setIntegrity] = useState<Record<string, unknown> | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
     setFetching(true);
     setError(null);
     try {
-      const data = await api.listConstraints(token);
+      const [data, score] = await Promise.all([
+        api.listConstraints(token),
+        api.integrityScore(token).catch(() => null),
+      ]);
       setConstraints(data as unknown as Constraint[]);
+      if (score) setIntegrity(score as Record<string, unknown>);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load constraints");
     } finally {
@@ -80,6 +85,21 @@ export default function ConstraintsPage() {
           Pin safety rules that survive context compaction
         </p>
       </div>
+
+      {/* Integrity score */}
+      {integrity && (
+        <div className="glass-card rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <div className="text-xs font-bold tracking-widest uppercase" style={{ color: "#7A7164" }}>Integrity Score</div>
+            <div className="text-2xl font-black font-display" style={{ color: Number(integrity.integrity_score) >= 1 ? "#059669" : "#C23B3B" }}>{(Number(integrity.integrity_score) * 100).toFixed(0)}%</div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs font-bold" style={{ color: "#7A7164" }}>Token Overhead</div>
+            <div className="text-sm font-mono font-bold" style={{ color: "#5A5248" }}>{(Number(integrity.token_overhead) * 100).toFixed(3)}%</div>
+            <div className="text-[11px]" style={{ color: "#7A7164" }}>target &lt;0.5%</div>
+          </div>
+        </div>
+      )}
 
       {/* Pin form */}
       <div className="glass-card rounded-2xl p-6">

@@ -41,6 +41,7 @@ class ConstraintResponse(BaseModel):
     is_active: bool
     previous_hash: Optional[str]
     entry_hash: str
+    kms_signature: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

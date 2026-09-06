@@ -17,6 +17,7 @@ class Memory(Base):
     source_provenance = Column(String(50), default="agent_direct")
     previous_hash = Column(String(64))
     entry_hash = Column(String(64), nullable=False)
+    sequence_number = Column(Integer)  # hash-chain sequence, for DB-backed verification and deterministic replay
     kms_signature = Column(Text)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

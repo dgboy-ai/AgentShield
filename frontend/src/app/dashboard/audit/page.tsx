@@ -29,6 +29,9 @@ export default function AuditPage() {
   const [chainValid, setChainValid] = useState<boolean | null>(null);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [timeTravelTs, setTimeTravelTs] = useState<string>("");
+  const [timeTravelResult, setTimeTravelResult] = useState<Record<string, unknown> | null>(null);
+  const [timeTravelLoading, setTimeTravelLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -50,6 +53,19 @@ export default function AuditPage() {
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function handleTimeTravel() {
+    if (!token || !timeTravelTs) return;
+    setTimeTravelLoading(true);
+    try {
+      const r = await api.auditTimeTravel(token, new Date(timeTravelTs).toISOString());
+      setTimeTravelResult(r);
+    } catch (e) {
+      setTimeTravelResult({ error: e instanceof ApiError ? e.message : String(e) } as unknown as Record<string, unknown>);
+    } finally {
+      setTimeTravelLoading(false);
+    }
+  }
 
   const eventsByType = (timeline.events_by_type || {}) as Record<string, number>;
 
@@ -111,6 +127,22 @@ export default function AuditPage() {
           </div>
         </div>
       )}
+
+      {/* Time-Travel Forensics */}
+      <div className="glass-card rounded-2xl p-6">
+        <h2 className="text-xs font-bold tracking-[0.15em] uppercase mb-4" style={{ color: "#7A7164" }}>Time-Travel Forensics <span className="normal-case tracking-normal font-medium ml-2" style={{ color: "#7A7164" }}>— AS OF SYSTEM TIME (CockroachDB)</span></h2>
+        <p className="text-xs mb-3" style={{ color: "#5A5248" }}>Reconstruct DB state at any timestamp — true MVCC on CockroachDB, filtered on SQLite.</p>
+        <div className="flex items-center gap-3">
+          <input type="datetime-local" value={timeTravelTs} onChange={(e) => setTimeTravelTs(e.target.value)} className="px-3 py-2 rounded-xl text-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }} />
+          <button onClick={handleTimeTravel} disabled={timeTravelLoading || !timeTravelTs} className="px-4 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: "#0D7C5F" }}>{timeTravelLoading ? "Querying..." : "Query"}</button>
+          <span className="text-[11px] font-mono" style={{ color: "#7A7164" }}>{timeTravelResult ? `${(timeTravelResult.total as number) ?? 0} events • ${timeTravelResult.backend as string ?? ""}` : ""}</span>
+        </div>
+        {timeTravelResult && (
+          <div className="mt-4 max-h-64 overflow-auto rounded-xl p-3 text-xs font-mono" style={{ background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)" }}>
+            <pre className="whitespace-pre-wrap break-all">{JSON.stringify(timeTravelResult, null, 2).slice(0, 4000)}</pre>
+          </div>
+        )}
+      </div>
 
       {!fetching && (
         <div className="glass-card rounded-2xl p-6">

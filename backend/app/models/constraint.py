@@ -15,6 +15,7 @@ class Constraint(Base):
     is_active = Column(Boolean, default=True)
     previous_hash = Column(String(64))
     entry_hash = Column(String(64), nullable=False)
+    kms_signature = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

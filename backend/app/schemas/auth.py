@@ -18,6 +18,12 @@ class Token(BaseModel):
     token_type: str = "bearer"
     user_id: str
     org_id: str
+    refresh_token: Optional[str] = None
+    expires_in: int = 900  # 15 minutes
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: Optional[str] = None
 
 
 class TokenData(BaseModel):

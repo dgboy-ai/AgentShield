@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends
 from app.models.user import User
 from app.routers.auth import get_current_user_dep
 from app.schemas.scan import ScanRequest, ScanResponse, PatternMatchResponse
-from app.core.pattern_detection import PatternDetectionEngine, Severity
+from app.core.pattern_detection import shared_engine as pattern_engine, Severity
 from app.core.audit_trail import EventType
 from app.routers.constraints import audit_trail
 
 router = APIRouter(prefix="/api/scan", tags=["scan"])
 
-pattern_engine = PatternDetectionEngine()
+# Use shared singleton
 
 # Wire audit trail to pattern detection events
 pattern_engine.add_listener(lambda event_type, data: audit_trail.record(
