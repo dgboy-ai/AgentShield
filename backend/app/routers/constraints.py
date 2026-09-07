@@ -25,17 +25,42 @@ audit_trail = AuditTrailEngine()
 signing_engine = SigningEngine()
 
 
+_audit_retry_queue: list[dict] = []  # for 4.7: retry failed audit writes
+
+
+def _flush_audit_retry_queue():
+    """Try to flush queued audit entries (called on next successful write)."""
+    if not _audit_retry_queue:
+        return
+    from app.models.database import SessionLocal
+    import logging
+    db = SessionLocal()
+    try:
+        for item in list(_audit_retry_queue):
+            try:
+                entry = AuditLogDB(**item)
+                db.add(entry)
+                db.commit()
+                _audit_retry_queue.remove(item)
+                logging.getLogger("agentshield.audit").info(f"Retried audit log {item.get('audit_id')} succeeded")
+            except Exception as e:
+                db.rollback()
+                logging.getLogger("agentshield.audit").warning(f"Retry failed for {item.get('audit_id')}: {e}")
+                break
+    finally:
+        db.close()
+
+
 def _persist_audit_to_db(event_type: str, data: dict) -> None:
     """Listener that writes audit events to the DB audit_log table.
     Fixed: use audit entry's actual entry_id as DB audit_id for restart idempotency,
-    so startup reload preserves hashes and verify stays valid. DB is source of truth."""
+    and queue for retry on failure (4.7) instead of silent drop."""
     try:
         from app.models.database import SessionLocal
         db = SessionLocal()
         try:
             org_id = data.get("org_id", "unknown")
             actual_event_type = data.get("event_type", event_type)
-            # Fetch the actual last audit entry (source of truth for hash/details)
             last = None
             try:
                 entries = audit_trail._entries.get(org_id, [])
@@ -60,7 +85,7 @@ def _persist_audit_to_db(event_type: str, data: dict) -> None:
                 target = data.get("target")
                 action = data.get("action", actual_event_type)
                 entry_id = data.get("entry_id") or str(__import__("uuid").uuid4())
-            entry = AuditLogDB(
+            entry_data = dict(
                 audit_id=entry_id,
                 org_id=org_id,
                 event_type=actual_event_type,
@@ -72,16 +97,29 @@ def _persist_audit_to_db(event_type: str, data: dict) -> None:
                 entry_hash=entry_hash,
                 sequence_number=data.get("chain_length"),
             )
+            entry = AuditLogDB(**entry_data)
             db.add(entry)
             db.commit()
+            # On success, try to flush any queued retries
+            if _audit_retry_queue:
+                _flush_audit_retry_queue()
         except Exception as e:
             db.rollback()
             import logging
-            logging.getLogger("agentshield.audit").debug("audit persist failed: %s", e)
+            logging.getLogger("agentshield.audit").warning(f"audit persist failed, queuing for retry: {e}")
+            # Queue for retry instead of silent drop (4.7)
+            try:
+                _audit_retry_queue.append(entry_data)  # type: ignore
+                if len(_audit_retry_queue) > 1000:
+                    # Prevent unbounded growth
+                    _audit_retry_queue.pop(0)
+            except Exception:
+                pass
         finally:
             db.close()
-    except Exception:
-        pass  # Audit persistence must never break the main path
+    except Exception as e:
+        import logging
+        logging.getLogger("agentshield.audit").error(f"audit persist outer failed: {e}")
 
 
 audit_trail.add_listener(_persist_audit_to_db)
@@ -116,8 +154,9 @@ def create_constraint(
         )
         raise HTTPException(status_code=400, detail=str(ve))
 
-    # Sign the constraint (before DB commit so signature is stored)
-    sign_result = signing_engine.sign_json({"constraint_id": pinned.constraint_id, "text": data.text})
+    # Sign the constraint with org binding to prevent cross-tenant replay (3.2)
+    sign_payload = {"constraint_id": pinned.constraint_id, "text": data.text, "org_id": org_id, "entry_hash": pinned.entry_hash, "previous_hash": pinned.previous_hash}
+    sign_result = signing_engine.sign_json(sign_payload)
     kms_signature = sign_result.signature if sign_result.success else None
 
     # Store in database
@@ -307,13 +346,16 @@ def get_constraint(
     row = db.query(ConstraintDB).filter(ConstraintDB.constraint_id == constraint_id, ConstraintDB.org_id == current_user.org_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Constraint not found")
-    # Verify signature on read (non-repudiation) - log if invalid
+    # Verify signature on read with cross-tenant protection (3.2) - try new then old for backward compat
     if row.kms_signature:
         try:
-            vr = signing_engine.verify_json({"constraint_id": str(row.constraint_id), "text": row.constraint_text}, row.kms_signature)
+            sign_payload_new = {"constraint_id": str(row.constraint_id), "text": row.constraint_text, "org_id": str(row.org_id), "entry_hash": row.entry_hash, "previous_hash": row.previous_hash}
+            vr = signing_engine.verify_json(sign_payload_new, row.kms_signature)
             if not vr.success:
-                import logging
-                logging.getLogger("agentshield.tamper").warning(f"Constraint signature invalid for {constraint_id} org {org_id}: {vr.error}")
+                vr_old = signing_engine.verify_json({"constraint_id": str(row.constraint_id), "text": row.constraint_text}, row.kms_signature)
+                if not vr_old.success:
+                    import logging
+                    logging.getLogger("agentshield.tamper").warning(f"Constraint signature invalid for {constraint_id} org {org_id}: {vr.error} (also old failed)")
         except Exception:
             pass
     return ConstraintResponse(
@@ -356,10 +398,11 @@ def update_constraint(
         constraint_type=ConstraintType(data.constraint_type) if data.constraint_type else None,
     )
 
-    # Re-sign if text changed
+    # Re-sign if text changed with cross-tenant binding
     new_sig = None
     if data.text:
-        sr = signing_engine.sign_json({"constraint_id": constraint_id, "text": updated.text})
+        sign_payload_upd = {"constraint_id": constraint_id, "text": updated.text, "org_id": org_id, "entry_hash": updated.entry_hash, "previous_hash": updated.previous_hash}
+        sr = signing_engine.sign_json(sign_payload_upd)
         new_sig = sr.signature if sr.success else None
 
     # Update database

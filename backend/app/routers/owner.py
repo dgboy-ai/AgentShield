@@ -38,7 +38,17 @@ from app.core.hash_chain import HashChainEngine
 router = APIRouter(prefix="/api/owner", tags=["owner"])
 
 # — Owner password: bcrypt hashed, timing-safe compare, no plaintext leak in logs
-_raw_owner_pw = os.getenv("OWNER_DASHBOARD_PASSWORD", "DivyanshAI@11")
+# 6.1 FIX: No hardcoded fallback in production - must be set via env, or generate random and fail closed
+_raw_owner_pw = os.getenv("OWNER_DASHBOARD_PASSWORD", "")
+_is_prod_owner = os.getenv("ENVIRONMENT", "development").lower() in ("production", "prod")
+if not _raw_owner_pw:
+    if _is_prod_owner:
+        raise RuntimeError("CRITICAL: OWNER_DASHBOARD_PASSWORD must be set in production (no default DivyanshAI@11)")
+    # Dev: generate random and warn (not hardcoded)
+    import secrets
+    _raw_owner_pw = secrets.token_urlsafe(16)
+    import logging
+    logging.getLogger("agentshield.owner").warning(f"OWNER_DASHBOARD_PASSWORD not set - generated ephemeral {len(_raw_owner_pw)}-char password for dev (set env for persistence)")
 _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 OWNER_PASSWORD_HASH = _pwd_ctx.hash(_raw_owner_pw)
 # clear raw from memory (best-effort)
@@ -94,21 +104,17 @@ def _create_owner_token() -> str:
 
 
 def _verify_owner(authorization: str = Header(None)):
-    """Verify owner JWT (preferred) or legacy raw password (timing-safe)."""
+    """Verify owner JWT only (no raw password fallback) - fixes 6.2 bypass."""
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization required")
     token = authorization.replace("Bearer ", "").strip()
-    # 1) Try JWT
+    # Only JWT, no raw password fallback (prevents bypass of expiry)
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("role") == "owner" and payload.get("sub") == "owner":
             return
-    except JWTError:
-        pass
-    # 2) Legacy: raw password with constant-time check via bcrypt
-    if _verify_owner_password(token):
-        return
-    # Do not leak which method failed
+    except JWTError as e:
+        raise HTTPException(status_code=403, detail=f"Invalid owner credentials: {e}")
     raise HTTPException(status_code=403, detail="Invalid owner credentials")
 
 
@@ -352,48 +358,52 @@ def get_owner_patterns(
 
 @router.get("/sessions")
 def get_owner_sessions(
+    limit: int = 50,
+    offset: int = 0,
     _auth: str = Depends(_verify_owner),
 ):
     """Session-wise ledger: one row per organization (real tenant session).
-    Each org is isolated chain — what orgs do in production: per-tenant DB + per-session verify.
-    Cached 5s to avoid verify storm.
+    Fixed 6.3: paginated, no per-org verify storm (uses DB counts, not hash_chain.verify per org).
+    Cached 5s to avoid DB storm.
     """
-    if _sessions_cache["data"] is not None and (time.time() - _sessions_cache["ts"]) < _sessions_TTL:
+    # Clamp pagination to prevent DoS
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    cache_key = f"{limit}:{offset}"
+    if _sessions_cache["data"] is not None and _sessions_cache.get("key") == cache_key and (time.time() - _sessions_cache["ts"]) < _sessions_TTL:
         return _sessions_cache["data"]
-    from app.routers.constraints import hash_chain as _hc
     from app.models.database import SessionLocal
-    from sqlalchemy import desc
+    from sqlalchemy import desc, func
     db = SessionLocal()
     try:
-        # join org → newest user for display, and counts
-        orgs = db.query(Organization).order_by(desc(Organization.created_at)).all()
+        total_orgs = db.query(func.count(Organization.org_id)).scalar() or 0
+        orgs = db.query(Organization).order_by(desc(Organization.created_at)).offset(offset).limit(limit).all()
         out=[]
         for org in orgs:
             oid=str(org.org_id)
-            # owner email = first user in org
             u=db.query(User).filter(User.org_id==org.org_id).order_by(User.created_at).first()
-            v=_hc.verify(oid)
-            head=_hc.get_chain_head(oid)
-            # last audit for this org
+            # Use DB counts, not hash_chain.verify (avoids O(N*M) CPU)
+            total_mem = db.query(func.count(Memory.memory_id)).filter(Memory.org_id==org.org_id).scalar() or 0
+            total_audit = db.query(func.count(AuditLog.audit_id)).filter(AuditLog.org_id==org.org_id).scalar() or 0
+            # head hash from DB (latest memory) without verify
+            head_mem = db.query(Memory).filter(Memory.org_id==org.org_id).order_by(desc(Memory.created_at)).first()
             last=db.query(AuditLog).filter(AuditLog.org_id==org.org_id).order_by(desc(AuditLog.recorded_at)).first()
             out.append({
                 "org_id": oid,
                 "org_name": org.org_name,
                 "owner_email": u.email if u else "—",
                 "session_label": f"{(u.email.split('@')[0] if u else oid[:8])} • {oid[:8]}",
-                "total_entries": v.total_entries,
-                "is_valid": v.is_valid,
-                "broken_at": v.broken_at,
-                "broken_entry_id": v.broken_entry_id,
-                "head_hash": head.entry_hash[:16]+"…" if head else "—",
-                "head_hash_full": head.entry_hash if head else None,
-                "verification_time_ms": v.verification_time_ms,
+                "total_entries": total_mem + total_audit,
+                "total_memories": total_mem,
+                "total_audit": total_audit,
+                "head_hash": head_mem.entry_hash[:16]+"…" if head_mem and head_mem.entry_hash else "—",
+                "head_hash_full": head_mem.entry_hash if head_mem else None,
                 "last_active": last.recorded_at.isoformat() if last and last.recorded_at else org.created_at.isoformat() if org.created_at else None,
-                "verified_at": v.verified_at.isoformat(),
             })
-        result={"total_sessions": len(out), "sessions": out}
+        result={"total_sessions": total_orgs, "sessions": out, "limit": limit, "offset": offset}
         _sessions_cache["ts"]=time.time()
         _sessions_cache["data"]=result
+        _sessions_cache["key"]=cache_key
         return result
     finally:
         db.close()
@@ -446,19 +456,23 @@ def _ensure_live_poller():
 
 @router.get("/stream")
 async def stream_owner(request: Request, authorization: str = Header(None)):
-    """Real-time SSE stream — single DB poll broadcast to all. Fixes N-clients × DB bottleneck."""
+    """Real-time SSE stream — single DB poll broadcast to all. Fixes N-clients × DB bottleneck. No query param leak (6.2)."""
     token = None
     if authorization:
         token=authorization.replace("Bearer ","").strip()
     if not token:
-        token=request.query_params.get("token","")
+        # Try httpOnly cookie (for EventSource with withCredentials)
+        token=request.cookies.get("owner_token", "")
+    # No query param fallback (prevents password leak in logs/history)
+    if not token:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail":"Authorization required (Bearer token or owner_token cookie)"}, status_code=401)
     try:
         payload=jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("role")!="owner": raise JWTError("role")
-    except Exception:
-        if not _verify_owner_password(token or ""):
-            from fastapi.responses import JSONResponse
-            return JSONResponse({"detail":"Invalid owner credentials"}, status_code=403)
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail":f"Invalid owner credentials: {e}"}, status_code=403)
     from fastapi.responses import StreamingResponse
     import json as _json
     _ensure_live_poller()

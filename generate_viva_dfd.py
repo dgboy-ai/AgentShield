@@ -92,10 +92,14 @@ digraph Level1 {
     
     // Use weight/constraint to help layout and avoid crossing P2->P7 and P3->P5
     P2 -> P5 [label=" generate entry_hash "];
+    P2 -> P6 [label=" sign constraint "];
+    P6 -> P2 [label=" kms_signature "];
 
     LLM -> P3 [label=" memory_content "];
     P3 -> P4 [label=" scan_text "];
-    P4 -> D7 [label=" risk_score / blocked "];
+    P4 -> P3 [label=" risk_score / blocked "];
+    P3 -> D7 [label=" save alert (if blocked) "];
+    P4 -> P7 [label=" pattern_detected event "];
     P3 -> P5 [label=" seq_number + hash req "];
     P5 -> P6 [label=" payload + prev_hash "];
     

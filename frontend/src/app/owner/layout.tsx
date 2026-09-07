@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = 'force-dynamic';
 import { useState, useEffect, createContext, useContext } from "react";
 import "./bastion.css";
 import { OwnerSidebar } from "@/components/owner-sidebar";
@@ -51,14 +52,14 @@ export function OwnerAuthProvider({ children }: { children: React.ReactNode }){
 export default function OwnerLayout({ children }: { children: React.ReactNode }){
   const { authenticated, loading } = useOwnerAuth();
   if(loading){
-    return <div className="owner-root min-h-screen flex items-center justify-center" style={{background:'var(--canvas-bg)'}}><div className="skeleton" style={{width:160,height:12}} /></div>;
+    return <div className="owner-root min-h-screen flex items-center justify-center" style={{background:'var(--canvas-bg)'}} suppressHydrationWarning><div className="skeleton" style={{width:160,height:12}} suppressHydrationWarning /></div>;
   }
   if(!authenticated) return <OwnerLoginPage/>;
   return (
-    <div className="owner-root">
-      <div className="owner-layout">
+    <div className="owner-root" suppressHydrationWarning>
+      <div className="owner-layout" suppressHydrationWarning>
         <OwnerSidebar/>
-        <div className="owner-viewport">
+        <div className="owner-viewport" suppressHydrationWarning>
           <header className="owner-header">
             <div style={{display:'flex',alignItems:'center',gap:10, flexWrap:'wrap'}}>
               <span className="glow-badge" style={{fontSize:11,fontWeight:900,fontFamily:'var(--font-sg)', color:'#fff', background:'linear-gradient(135deg,#7c3aed,#4f46e5)', padding:'5px 12px', borderRadius:6, textTransform:'uppercase', letterSpacing:0.5, display:'inline-block'}}>Owner Cockpit</span>
@@ -87,7 +88,7 @@ function OwnerLoginPage(){
   const [submitting,setSubmitting]=useState(false);
   const handleSubmit = async (e:React.FormEvent)=>{ e.preventDefault(); setSubmitting(true); setError(""); const res=await login(password); if(!res.ok){ setError(res.error||"Invalid password"); setSubmitting(false);} };
   return (
-    <div className="owner-root min-h-screen flex items-center justify-center" style={{background:'var(--canvas-bg)', padding:24}}>
+    <div className="owner-root min-h-screen flex items-center justify-center" style={{background:'var(--canvas-bg)', padding:24}} suppressHydrationWarning>
       <div className="panel" style={{width:'100%', maxWidth:420, padding:28}}>
         <div className="eyebrow">Owner Access • Private URL</div>
         <div style={{display:'flex',alignItems:'center',gap:14, marginTop:12, marginBottom:8}}>
@@ -113,3 +114,5 @@ function OwnerLoginPage(){
     </div>
   );
 }
+
+

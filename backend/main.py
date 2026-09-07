@@ -189,28 +189,64 @@ def anchor_hashes_job():
             except Exception as se:
                 anchor_logger.warning(f"S3 anchor failed: {se}")
 
-        # 4. Optional external: webhook
+        # 4. Optional external: webhook (6.4 SSRF fix: validate URL)
         webhook = os.getenv("ANCHOR_WEBHOOK_URL", "").strip()
         if webhook:
-            try:
-                import httpx
-                for org_id in org_ids:
-                    ae = audit_trail._entries.get(org_id, [])
-                    if ae:
-                        try:
-                            httpx.post(webhook, json={"org_id": org_id, "head": ae[-1].entry_hash, "len": len(ae), "at": now.isoformat()}, timeout=5.0)
-                            from app.models.database import SessionLocal as _SL4
-                            from app.models.chain_anchor import ChainAnchor as _CA4
-                            db4 = _SL4()
+            # SSRF protection: only allow https, no private IPs, no metadata
+            def _is_safe_webhook(url: str) -> bool:
+                try:
+                    from urllib.parse import urlparse
+                    import ipaddress
+                    p = urlparse(url)
+                    if p.scheme not in ("https",):
+                        return False
+                    host = p.hostname or ""
+                    # Block private/metadata IPs
+                    try:
+                        ip = ipaddress.ip_address(host)
+                        if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
+                            return False
+                    except ValueError:
+                        # Hostname, check for private-like
+                        if host in ("localhost", "metadata.google.internal") or host.endswith(".internal"):
+                            return False
+                        if host.startswith("10.") or host.startswith("192.168.") or host.startswith("172."):
+                            # Rough check for 172.16-31
+                            if host.startswith("172."):
+                                try:
+                                    second = int(host.split(".")[1])
+                                    if 16 <= second <= 31:
+                                        return False
+                                except:
+                                    pass
+                    # Block non-https ports and userinfo
+                    if p.username or p.password:
+                        return False
+                    return True
+                except Exception:
+                    return False
+            if not _is_safe_webhook(webhook):
+                anchor_logger.warning(f"Webhook anchor skipped: unsafe URL {webhook[:50]}")
+            else:
+                try:
+                    import httpx
+                    for org_id in org_ids:
+                        ae = audit_trail._entries.get(org_id, [])
+                        if ae:
                             try:
-                                db4.add(_CA4(org_id=org_id, chain_type="audit", chain_head_hash=ae[-1].entry_hash, chain_length=len(ae), anchor_target="webhook", external_ref=webhook, created_at=now))
-                                db4.commit()
-                            finally:
-                                db4.close()
-                        except Exception:
-                            pass
-            except Exception as we:
-                anchor_logger.warning(f"Webhook anchor failed: {we}")
+                                httpx.post(webhook, json={"org_id": org_id, "head": ae[-1].entry_hash, "len": len(ae), "at": now.isoformat()}, timeout=5.0)
+                                from app.models.database import SessionLocal as _SL4
+                                from app.models.chain_anchor import ChainAnchor as _CA4
+                                db4 = _SL4()
+                                try:
+                                    db4.add(_CA4(org_id=org_id, chain_type="audit", chain_head_hash=ae[-1].entry_hash, chain_length=len(ae), anchor_target="webhook", external_ref=webhook, created_at=now))
+                                    db4.commit()
+                                finally:
+                                    db4.close()
+                            except Exception:
+                                pass
+                except Exception as we:
+                    anchor_logger.warning(f"Webhook anchor failed: {we}")
 
         anchor_logger.info(f"Successfully anchored hash chains for {len(org_ids)} org(s) to DB + file + external (if configured).")
     except Exception as e:

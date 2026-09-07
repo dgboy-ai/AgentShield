@@ -76,9 +76,12 @@ These data stores map directly to the SQLAlchemy models representing the Cockroa
 * `generate entry_hash`: Request to append the constraint to the hash chain.
 * `memory_content`: The raw text payload submitted by the LLM agent.
 * `scan_text`: Payload forwarded to the Pattern Detection Engine.
-* `risk_score / blocked`: Evaluation result dictating if the memory is safe.
+* `risk_score / blocked`: Evaluation result returned from Pattern Detection back to Memory Store.
+* `save alert (if blocked)`: Memory Store writes a high-severity alert to D7 (alerts) if the memory is blocked.
+* `pattern_detected event`: Pattern Engine fires an event to the Audit Trail (P7).
 * `seq_number + hash req`: Request to append the memory to the hash chain.
 * `payload + prev_hash`: Data sent to the Hash Engine to compute the cryptographic link.
+* `sign constraint` / `kms_signature`: Constraint Pinning and Memory Store sending data to AWS KMS for digital signing.
 * `signed entry_hash`: The hash returned and cryptographically signed.
 * `save memory`: Database persistence of the memory.
 * `auth event` / `audit event`: Security and system lifecycle events sent to the Audit Trail.

@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
@@ -24,25 +25,34 @@ export default function MemoryPage() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [content, setContent] = useState("");
   const [type, setType] = useState("episodic");
+  const [filterType, setFilterType] = useState<string>("");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const PAGE = 50;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (reset = true) => {
     if (!token) return;
     setFetching(true);
     setError(null);
     try {
-      const data = await api.listMemories(token);
-      setMemories(data as unknown as Memory[]);
+      const off = reset ? 0 : offset;
+      const data = await api.listMemories(token, { limit: PAGE, offset: off });
+      const arr = data as unknown as Memory[];
+      if (reset) { setMemories(arr); setOffset(arr.length); setHasMore(arr.length >= PAGE); }
+      else { setMemories((prev) => [...prev, ...arr]); setOffset((o) => o + arr.length); setHasMore(arr.length >= PAGE); }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load memories");
     } finally {
       setFetching(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(true); }, [load]);
 
   async function handleStore(e: React.FormEvent) {
     e.preventDefault();
@@ -52,13 +62,19 @@ export default function MemoryPage() {
       await api.storeMemory(token, content.trim(), type);
       setContent("");
       toast.success("Memory stored with hash chain integrity");
-      load();
+      load(true);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed");
     } finally {
       setLoading(false);
     }
   }
+
+  const filtered = memories.filter((m) => {
+    if (filterType && m.memory_type !== filterType) return false;
+    if (search && !m.content.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-8 animate-slide-up">
@@ -123,9 +139,17 @@ export default function MemoryPage() {
       {error && (
         <div className="glass-card rounded-2xl p-6 text-center" style={{ background: "rgba(194,59,59,0.04)", border: "1px solid rgba(194,59,59,0.12)" }}>
           <p className="text-sm font-medium mb-3" style={{ color: "#C23B3B" }}>{error}</p>
-          <button onClick={load} className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: "rgba(0,0,0,0.04)" }}>Retry</button>
+          <button onClick={() => load(true)} className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: "rgba(0,0,0,0.04)" }}>Retry</button>
         </div>
       )}
+
+      {/* search + filter */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search memories..." className="flex-1 min-w-[200px] px-4 py-2.5 rounded-xl text-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)" }} />
+        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-3 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)" }}>
+          <option value="">All types</option><option value="episodic">Episodic</option><option value="semantic">Semantic</option><option value="procedural">Procedural</option>
+        </select>
+      </div>
 
       {fetching && (
         <div className="space-y-3">
@@ -135,19 +159,19 @@ export default function MemoryPage() {
         </div>
       )}
 
-      {!fetching && !error && memories.length === 0 && (
+      {!fetching && !error && filtered.length === 0 && (
         <div className="glass-card rounded-2xl p-14 text-center">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5" style={{ background: "rgba(0,0,0,0.03)" }}>
             <svg className="w-8 h-8" style={{ color: "#7A7164" }} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375" />
             </svg>
           </div>
-          <p className="font-bold font-display" style={{ color: "#1A1A1A" }}>No memories stored yet</p>
-          <p className="text-xs mt-1" style={{ color: "#7A7164" }}>Store your first memory above</p>
+          <p className="font-bold font-display" style={{ color: "#1A1A1A" }}>{memories.length === 0 ? "No memories stored yet" : "No matches"}</p>
+          <p className="text-xs mt-1" style={{ color: "#7A7164" }}>{memories.length === 0 ? "Store your first memory above" : "Try a different search or filter"}</p>
         </div>
       )}
 
-      {!fetching && memories.map((m, i) => {
+      {!fetching && filtered.map((m, i) => {
         const style = TYPE_STYLES[m.memory_type] || TYPE_STYLES.episodic;
         return (
           <div
@@ -170,6 +194,13 @@ export default function MemoryPage() {
           </div>
         );
       })}
+      {!fetching && hasMore && filtered.length > 0 && (
+        <div className="flex justify-center">
+          <button onClick={() => load(false)} className="px-5 py-2.5 rounded-xl text-xs font-bold" style={{ background: "rgba(13,124,95,0.08)", color: "#0D7C5F" }}>Load More ({memories.length} loaded)</button>
+        </div>
+      )}
     </div>
   );
 }
+
+

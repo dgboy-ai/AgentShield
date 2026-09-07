@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = 'force-dynamic';
+
 import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -34,11 +36,11 @@ export default function DashboardLayout({
   if (!token) return null;
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen" suppressHydrationWarning>
       <CursorGlow />
       <Sidebar />
-      <main className="ml-[260px] p-8 min-h-screen relative z-10">
-        <div className="max-w-6xl animate-stagger">
+      <main className="ml-[260px] p-8 min-h-screen relative z-10" suppressHydrationWarning>
+        <div className="max-w-6xl animate-stagger" suppressHydrationWarning>
           {children}
         </div>
       </main>

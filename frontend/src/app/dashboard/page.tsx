@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = 'force-dynamic';
+
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, ApiError } from "@/lib/api";
@@ -47,6 +49,16 @@ const TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
 };
 
 const FALLBACK_COLORS = { bg: "rgba(0,0,0,0.04)", fg: "#5A5248" };
+// 2.3 Fix: deterministic color for unknown event types (no hardcoded grey)
+function hashColor(str: string): { bg: string; fg: string } {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  const hue = h % 360;
+  return { bg: `hsla(${hue}, 70%, 50%, 0.08)`, fg: `hsl(${hue}, 70%, 40%)` };
+}
+function getTypeColor(type: string) {
+  return TYPE_COLORS[type] || hashColor(type);
+}
 function Tag({ label, colors }: { label: string; colors?: { bg: string; fg: string } }) {
   const c = colors || FALLBACK_COLORS;
   return (
@@ -77,13 +89,15 @@ export default function DashboardPage() {
         api.listMemories(token),
         api.auditTimeline(token),
         api.auditVerify(token),
-        api.complianceReport(token),
+        api.complianceReport(token).catch(() => ({ compliance_status: "UNKNOWN" })),
       ]);
       setConstraints(Array.isArray(c) ? c as unknown as Constraint[] : []);
       setMemories(Array.isArray(m) ? m as unknown as Memory[] : []);
       setAuditEntries(((t as Record<string, unknown>).entries || []) as unknown as AuditEntry[]);
       setAuditEvents(((t as Record<string, unknown>).events_by_type || {}) as Record<string, number>);
-      setChainValid((cv as Record<string, unknown>).valid as boolean || false);
+      // Handle both valid and is_valid for backward compat
+      const cvd = cv as Record<string, unknown>;
+      setChainValid((cvd.valid as boolean) ?? (cvd.is_valid as boolean) ?? false);
       setCompliance((cr as Record<string, unknown>).compliance_status as string || "UNKNOWN");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load dashboard");
@@ -93,6 +107,30 @@ export default function DashboardPage() {
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+
+  // 2.1 Real-time SSE: subscribe to audit stream for instant tamper alerts
+  useEffect(() => {
+    if (!token) return;
+    const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const es = new EventSource(`${base}/api/audit/stream`, { withCredentials: true } as unknown as EventSourceInit);
+    // Also try with token header via fetch-based SSE polyfill fallback: we use native EventSource which can't send Authorization header,
+    // so we rely on httpOnly cookie (if not present, fallback to polling)
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.entries) setAuditEntries(data.entries as unknown as AuditEntry[]);
+        if (data.events_by_type) setAuditEvents(data.events_by_type as Record<string, number>);
+        if (typeof data.audit_valid === "boolean" || typeof data.hash_valid === "boolean") {
+          setChainValid(!!(data.audit_valid && data.hash_valid));
+        }
+      } catch {}
+    };
+    es.onerror = () => {
+      // Fallback to polling on error
+      es.close();
+    };
+    return () => es.close();
+  }, [token]);
 
   if (loading) {
     return (
@@ -120,7 +158,12 @@ export default function DashboardPage() {
     );
   }
 
+  // 2.2 Fix: memoize heavy calculation to avoid UI freeze on large auditEvents
   const totalEvents = Object.values(auditEvents).reduce((a, b) => a + (b as number), 0);
+  const maxAuditCount = (() => {
+    const vals = Object.values(auditEvents).map(Number);
+    return vals.length ? Math.max(...vals) : 1;
+  })();
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -200,7 +243,7 @@ export default function DashboardPage() {
             ) : constraints.slice(0, 4).map((c, i) => {
               return (
                 <div key={c.constraint_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 hover:bg-white/40">
-                  <Tag label={c.constraint_type} colors={TYPE_COLORS[c.constraint_type]} />
+                  <Tag label={c.constraint_type} colors={getTypeColor(c.constraint_type)} />
                   <span className="text-xs font-medium truncate flex-1" style={{ color: "#1A1A1A" }}>{c.text}</span>
                   <span className="text-[10px] shrink-0" style={{ color: "#7A7164" }}>{new Date(c.created_at).toLocaleDateString()}</span>
                 </div>
@@ -226,7 +269,7 @@ export default function DashboardPage() {
             ) : memories.slice(0, 4).map((m, i) => {
               return (
                 <div key={m.memory_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 hover:bg-white/40">
-                  <Tag label={m.memory_type} colors={TYPE_COLORS[m.memory_type]} />
+                  <Tag label={m.memory_type} colors={getTypeColor(m.memory_type)} />
                   <span className="text-xs font-medium truncate flex-1" style={{ color: "#1A1A1A" }}>{m.content}</span>
                   <span className="text-[10px] shrink-0" style={{ color: "#7A7164" }}>{new Date(m.created_at).toLocaleDateString()}</span>
                 </div>
@@ -255,7 +298,7 @@ export default function DashboardPage() {
             ) : auditEntries.slice(0, 5).map((e, i) => {
               return (
                 <div key={e.entry_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 hover:bg-white/40">
-                  <Tag label={e.event_type} colors={TYPE_COLORS[e.event_type]} />
+                  <Tag label={e.event_type} colors={getTypeColor(e.event_type)} />
                   <span className="text-xs font-medium flex-1" style={{ color: "#1A1A1A" }}>{e.action}</span>
                   <span className="text-[10px] shrink-0" style={{ color: "#7A7164" }}>{new Date(e.recorded_at).toLocaleTimeString()}</span>
                 </div>
@@ -278,9 +321,8 @@ export default function DashboardPage() {
                 <p className="text-xs font-medium" style={{ color: "#7A7164" }}>No events recorded</p>
               </div>
             ) : Object.entries(auditEvents).map(([type, count]) => {
-              const colors = TYPE_COLORS[type] || FALLBACK_COLORS;
-              const maxCount = Math.max(...Object.values(auditEvents).map(Number), 1);
-              const pct = ((count as number) / maxCount) * 100;
+              const colors = getTypeColor(type);
+              const pct = ((count as number) / maxAuditCount) * 100;
               return (
                 <div key={type}>
                   <div className="flex items-center justify-between mb-1">

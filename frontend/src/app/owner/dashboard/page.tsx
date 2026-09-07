@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useOwnerAuth } from "../layout";
 
@@ -239,3 +240,5 @@ function badgeFor(t:string){
   if(t.includes('CHAIN')) return 'badge-green';
   return 'badge-yellow';
 }
+
+

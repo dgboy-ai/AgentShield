@@ -30,17 +30,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    const saved = localStorage.getItem("agentshield_auth");
-    if (saved) {
+    // Try httpOnly cookie refresh first (secure), fallback to localStorage for backward compat
+    const tryRefresh = async () => {
       try {
-        const parsed = JSON.parse(saved);
-        setState({ ...parsed, loading: false });
-      } catch {
+        const res = await api.refresh();
+        setState({ token: res.access_token, userId: res.user_id, orgId: res.org_id, email: null, loading: false });
+        // Also update localStorage for compat but token is now httpOnly primary
+        localStorage.setItem("agentshield_auth", JSON.stringify({ token: res.access_token, userId: res.user_id, orgId: res.org_id, email: null, loading: false }));
+        return;
+      } catch {}
+      const saved = localStorage.getItem("agentshield_auth");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          // Validate token not expired by trying /me
+          try {
+            await api.me(parsed.token);
+            setState({ ...parsed, loading: false });
+          } catch {
+            // Token expired, try refresh via cookie
+            const ok = await refresh();
+            if (!ok) setState((s) => ({ ...s, loading: false }));
+          }
+        } catch {
+          setState((s) => ({ ...s, loading: false }));
+        }
+      } else {
         setState((s) => ({ ...s, loading: false }));
       }
-    } else {
-      setState((s) => ({ ...s, loading: false }));
-    }
+    };
+    tryRefresh();
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -53,7 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading: false,
     };
     setState(newState);
-    localStorage.setItem("agentshield_auth", JSON.stringify(newState));
+    // httpOnly cookie is primary; localStorage kept only for backward-compat header fallback (cleared on logout)
+    try { localStorage.setItem("agentshield_auth", JSON.stringify(newState)); } catch {}
   }, []);
 
   const register = useCallback(async (email: string, password: string, fullName: string) => {
@@ -66,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading: false,
     };
     setState(newState);
-    localStorage.setItem("agentshield_auth", JSON.stringify(newState));
+    try { localStorage.setItem("agentshield_auth", JSON.stringify(newState)); } catch {}
   }, []);
 
   const refresh = useCallback(async () => {

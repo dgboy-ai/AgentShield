@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
@@ -58,13 +59,48 @@ export default function AuditPage() {
     if (!token || !timeTravelTs) return;
     setTimeTravelLoading(true);
     try {
-      const r = await api.auditTimeTravel(token, new Date(timeTravelTs).toISOString());
-      setTimeTravelResult(r);
+      // datetime-local gives local wall time without offset; interpret as local then convert to UTC
+      // Display the local timezone offset to avoid IST (+05:30) confusion
+      const local = new Date(timeTravelTs);
+      const iso = local.toISOString();
+      const r = await api.auditTimeTravel(token, iso);
+      setTimeTravelResult({ ...r as Record<string, unknown>, _queried_as_utc: iso, _local_input: timeTravelTs, _tz_offset_min: -local.getTimezoneOffset() });
     } catch (e) {
       setTimeTravelResult({ error: e instanceof ApiError ? e.message : String(e) } as unknown as Record<string, unknown>);
     } finally {
       setTimeTravelLoading(false);
     }
+  }
+
+  // pagination for audit
+  const [auditOffset, setAuditOffset] = useState(0);
+  const AUDIT_PAGE = 50;
+  async function loadMoreAudit() {
+    if (!token) return;
+    try {
+      const next = await api.auditEntries(token, { limit: String(AUDIT_PAGE), offset: String(auditOffset + AUDIT_PAGE) });
+      const more = (next as unknown as { entries?: AuditEntry[] })?.entries || (Array.isArray(next) ? next as unknown as AuditEntry[] : []);
+      if (more.length) { setEntries((prev) => [...prev, ...more]); setAuditOffset((o) => o + AUDIT_PAGE); }
+    } catch {}
+  }
+  async function handleExportJsonl() {
+    if (!token) return;
+    try {
+      const raw = await api.exportJsonl(token) as unknown;
+      const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+      const blob = new Blob([text], { type: "application/jsonl" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `agentshield-audit-${new Date().toISOString().slice(0,10)}.jsonl`; a.click(); URL.revokeObjectURL(url);
+    } catch (e) { setError(e instanceof ApiError ? e.message : String(e)); }
+  }
+  async function handleExportCompliance() {
+    if (!token) return;
+    try {
+      const r = await api.complianceReport(token) as unknown as Record<string, unknown>;
+      const blob = new Blob([JSON.stringify(r, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `agentshield-compliance-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url);
+    } catch {}
   }
 
   const eventsByType = (timeline.events_by_type || {}) as Record<string, number>;
@@ -132,14 +168,17 @@ export default function AuditPage() {
       <div className="glass-card rounded-2xl p-6">
         <h2 className="text-xs font-bold tracking-[0.15em] uppercase mb-4" style={{ color: "#7A7164" }}>Time-Travel Forensics <span className="normal-case tracking-normal font-medium ml-2" style={{ color: "#7A7164" }}>— AS OF SYSTEM TIME (CockroachDB)</span></h2>
         <p className="text-xs mb-3" style={{ color: "#5A5248" }}>Reconstruct DB state at any timestamp — true MVCC on CockroachDB, filtered on SQLite.</p>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <input type="datetime-local" value={timeTravelTs} onChange={(e) => setTimeTravelTs(e.target.value)} className="px-3 py-2 rounded-xl text-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }} />
           <button onClick={handleTimeTravel} disabled={timeTravelLoading || !timeTravelTs} className="px-4 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: "#0D7C5F" }}>{timeTravelLoading ? "Querying..." : "Query"}</button>
-          <span className="text-[11px] font-mono" style={{ color: "#7A7164" }}>{timeTravelResult ? `${(timeTravelResult.total as number) ?? 0} events • ${timeTravelResult.backend as string ?? ""}` : ""}</span>
+          <span className="text-[11px] font-mono" style={{ color: "#7A7164" }}>{timeTravelResult ? `${(timeTravelResult.total as number) ?? 0} events • ${timeTravelResult.backend as string ?? ""}${(timeTravelResult as Record<string, unknown>)._tz_offset_min !== undefined ? ` • local UTC${Number((timeTravelResult as Record<string, unknown>)._tz_offset_min) >= 0 ? "+" : ""}${(Number((timeTravelResult as Record<string, unknown>)._tz_offset_min)/60)}` : ""}` : ""}</span>
+          <button onClick={handleExportJsonl} className="ml-auto px-3 py-2 rounded-xl text-xs font-bold" style={{ background: "rgba(0,0,0,0.04)", color: "#0D7C5F" }}>Export JSONL</button>
+          <button onClick={handleExportCompliance} className="px-3 py-2 rounded-xl text-xs font-bold" style={{ background: "rgba(0,0,0,0.04)", color: "#0D7C5F" }}>Export Compliance JSON</button>
         </div>
+        {timeTravelTs && <p className="text-[11px] mt-2" style={{ color: "#7A7164" }}>Input is local time ({Intl.DateTimeFormat().resolvedOptions().timeZone} UTC{new Date().getTimezoneOffset() <= 0 ? "+" : ""}{(-new Date().getTimezoneOffset()/60)}); sent as UTC ISO to backend.</p>}
         {timeTravelResult && (
-          <div className="mt-4 max-h-64 overflow-auto rounded-xl p-3 text-xs font-mono" style={{ background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)" }}>
-            <pre className="whitespace-pre-wrap break-all">{JSON.stringify(timeTravelResult, null, 2).slice(0, 4000)}</pre>
+          <div className="mt-4 max-h-72 overflow-auto rounded-xl p-3 text-xs font-mono" style={{ background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)" }}>
+            <pre className="whitespace-pre-wrap break-all">{JSON.stringify(timeTravelResult, null, 2).slice(0, 8000)}</pre>
           </div>
         )}
       </div>
@@ -151,7 +190,7 @@ export default function AuditPage() {
             <p className="text-sm text-center py-10" style={{ color: "#7A7164" }}>No audit entries yet</p>
           )}
           <div className="space-y-1">
-            {entries.map((e, i) => {
+            {entries.slice(0, 100).map((e, i) => {
               const style = EVENT_COLORS[e.event_type] || EVENT_COLORS.default;
               return (
                 <div
@@ -175,8 +214,13 @@ export default function AuditPage() {
               );
             })}
           </div>
+          <div className="flex justify-center pt-3">
+            <button onClick={loadMoreAudit} className="px-4 py-2 rounded-xl text-xs font-bold" style={{ background: "rgba(13,124,95,0.08)", color: "#0D7C5F" }}>Load More ({entries.length} loaded)</button>
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+

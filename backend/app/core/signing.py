@@ -530,16 +530,27 @@ class SigningEngine:
                 Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
             ).decode("utf-8")
         elif format == "jwk":
-            # Simplified JWK export
-            pub_bytes = self._public_key.public_bytes(
-                Encoding.X962, PublicFormat.CompressedPoint
-            )
+            # Correct JWK export: use uncompressed point (0x04 || X || Y), then split X/Y
+            # Compressed point is 33 bytes (1 prefix + 32 X), not suitable for slicing
+            try:
+                pub_bytes_uncompressed = self._public_key.public_bytes(
+                    Encoding.X962, PublicFormat.UncompressedPoint
+                )
+                # Uncompressed: 0x04 + 32 X + 32 Y = 65 bytes
+                x = pub_bytes_uncompressed[1:33]
+                y = pub_bytes_uncompressed[33:65]
+            except Exception:
+                # Fallback: try to derive from numbers
+                from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicNumbers
+                numbers = self._public_key.public_numbers()
+                x = numbers.x.to_bytes(32, "big")
+                y = numbers.y.to_bytes(32, "big")
             return json.dumps(
                 {
                     "kty": "EC",
                     "crv": "P-256",
-                    "x": base64.urlsafe_b64encode(pub_bytes[:32]).decode().rstrip("="),
-                    "y": base64.urlsafe_b64encode(pub_bytes[32:]).decode().rstrip("="),
+                    "x": base64.urlsafe_b64encode(x).decode().rstrip("="),
+                    "y": base64.urlsafe_b64encode(y).decode().rstrip("="),
                     "kid": self._key_id,
                 }
             )

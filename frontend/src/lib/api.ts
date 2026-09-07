@@ -1,4 +1,6 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" ? window.location.origin.replace(":3000", ":8000") : "http://localhost:8000");
 
 interface ApiOptions {
   method?: string;
@@ -22,12 +24,43 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  let res = await fetch(`${API_BASE}${path}`, {
     method: opts.method || "GET",
     headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
     credentials: "include", // for httpOnly refresh/access cookies
   });
+
+  // 5.2: Handle 401 with httpOnly refresh (XSS mitigation)
+  if (res.status === 401 && !path.includes("/auth/refresh") && !path.includes("/auth/login") && !path.includes("/auth/register")) {
+    try {
+      const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        // Update localStorage with new access token if present
+        try {
+          const saved = localStorage.getItem("agentshield_auth");
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            parsed.token = refreshData.access_token;
+            localStorage.setItem("agentshield_auth", JSON.stringify(parsed));
+            // Retry original request with new token
+            if (refreshData.access_token) headers["Authorization"] = `Bearer ${refreshData.access_token}`;
+            res = await fetch(`${API_BASE}${path}`, {
+              method: opts.method || "GET",
+              headers,
+              body: opts.body ? JSON.stringify(opts.body) : undefined,
+              credentials: "include",
+            });
+            if (res.ok) {
+              if (res.status === 204) return undefined as T;
+              return res.json();
+            }
+          }
+        } catch {}
+      }
+    } catch {}
+  }
 
   if (!res.ok) {
     let detail: unknown;
@@ -75,11 +108,19 @@ export const api = {
     ),
 
   // Constraints
-  listConstraints: (token: string) =>
-    request<Record<string, unknown>[]>("/api/constraints", { token }),
+  listConstraints: (token: string, params?: { limit?: number; offset?: number }) => {
+    const qs = params ? "?" + new URLSearchParams(Object.entries(params).reduce((acc, [k, v]) => { if (v !== undefined) acc[k] = String(v); return acc; }, {} as Record<string, string>)).toString() : "";
+    return request<Record<string, unknown>[]>(`/api/constraints${qs}`, { token });
+  },
   pinConstraint: (token: string, text: string, constraint_type: string) =>
     request<Record<string, unknown>>("/api/constraints", {
       method: "POST",
+      body: { text, constraint_type },
+      token,
+    }),
+  updateConstraint: (token: string, id: string, text: string, constraint_type?: string) =>
+    request<Record<string, unknown>>(`/api/constraints/${id}`, {
+      method: "PUT",
       body: { text, constraint_type },
       token,
     }),
@@ -91,8 +132,10 @@ export const api = {
     request<Record<string, unknown>>("/api/constraints/integrity/score", { token }),
 
   // Memories
-  listMemories: (token: string) =>
-    request<Record<string, unknown>[]>("/api/memories", { token }),
+  listMemories: (token: string, params?: { limit?: number; offset?: number }) => {
+    const qs = params ? "?" + new URLSearchParams(Object.entries(params).reduce((acc, [k, v]) => { if (v !== undefined) acc[k] = String(v); return acc; }, {} as Record<string, string>)).toString() : "";
+    return request<Record<string, unknown>[]>(`/api/memories${qs}`, { token });
+  },
   storeMemory: (token: string, content: string, memory_type: string) =>
     request<Record<string, unknown>>("/api/memories", {
       method: "POST",

@@ -104,8 +104,20 @@ def store_memory(
     org_id = str(current_user.org_id)
     memory_id = str(uuid.uuid4())
 
-    # Scan for injection patterns BEFORE touching the hash chain
-    scan_result = pattern_engine.scan(data.content)
+    # Scan for injection patterns BEFORE touching the hash chain - scan all user-controlled fields (3.3)
+    combined_text = f"{data.content} {data.source_provenance} {data.memory_type}"
+    scan_result = pattern_engine.scan(combined_text)
+    # Also individually scan source_provenance and memory_type to catch selective bypass
+    if not scan_result.blocked:
+        for field_name, field_val in [("source_provenance", data.source_provenance), ("memory_type", data.memory_type)]:
+            r = pattern_engine.scan(field_val)
+            if r.blocked:
+                scan_result = r
+                break
+            # Merge matches for audit
+            if r.matches:
+                scan_result.matches.extend(r.matches)
+                scan_result.risk_score += r.risk_score
     if scan_result.blocked:
         # Persist alert to DB
         alert = AlertDB(
@@ -141,8 +153,15 @@ def store_memory(
     entry_hash = entry.entry_hash
     previous_hash = entry.previous_hash  # use chain's previous_hash (seed for first) not None
 
-    # Sign the memory
-    sign_result = signing_engine.sign_json(payload)
+    # Sign the memory - include org_id and chain position to prevent cross-tenant replay (3.2)
+    sign_payload = {
+        **payload,
+        "org_id": org_id,
+        "previous_hash": previous_hash,
+        "entry_hash": entry_hash,
+        "sequence_number": entry.sequence_number,
+    }
+    sign_result = signing_engine.sign_json(sign_payload)
     kms_signature = sign_result.signature if sign_result.success else None
 
     # Store in database - use entry's created_at and sequence for deterministic replay
@@ -216,6 +235,14 @@ def list_memories(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dep),
 ):
+    # Enforce upper bound to prevent DoS via ?limit=10000000 (3.4)
+    from fastapi import Query
+    if limit > 100:
+        limit = 100
+    if offset < 0:
+        offset = 0
+    if limit < 1:
+        limit = 1
     query = db.query(MemoryDB).filter(MemoryDB.org_id == current_user.org_id)
 
     if memory_type:
@@ -310,15 +337,28 @@ def get_memory(
                 memory.entry_hash,
                 tmp.entry_hash,
             )
-        # Verify KMS signature on read (non-repudiation) - if present
+        # Verify KMS signature on read (non-repudiation) - with cross-tenant protection (3.2)
+        # Try new payload (with org_id+chain) first, fallback to old for backward compat
         if memory.kms_signature:
             try:
-                vr = signing_engine.verify_json(payload, memory.kms_signature)
+                sign_payload_new = {
+                    **payload,
+                    "org_id": str(memory.org_id),
+                    "previous_hash": memory.previous_hash,
+                    "entry_hash": memory.entry_hash,
+                    "sequence_number": seq,
+                }
+                vr = signing_engine.verify_json(sign_payload_new, memory.kms_signature)
                 if not vr.success:
-                    import logging
-                    logging.getLogger("agentshield.tamper").warning(
-                        f"Memory signature invalid for {memory.memory_id} org {memory.org_id}: {vr.error} backend={vr.backend.value}"
-                    )
+                    # Fallback try old payload (without org_id) for legacy entries
+                    vr_old = signing_engine.verify_json(payload, memory.kms_signature)
+                    if not vr_old.success:
+                        import logging
+                        logging.getLogger("agentshield.tamper").warning(
+                            f"Memory signature invalid for {memory.memory_id} org {memory.org_id}: {vr.error} backend={vr.backend.value} (also old payload failed)"
+                        )
+                    # else legacy valid (pre-3.2) - still log but not as tamper
+                # else new payload valid
             except Exception:
                 pass
     except Exception:

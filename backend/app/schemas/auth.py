@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 
 
@@ -7,10 +7,26 @@ class UserCreate(BaseModel):
     password: str
     full_name: str
 
+    @field_validator("password")
+    @classmethod
+    def validate_password_length(cls, v: str) -> str:
+        if len(v) > 128:
+            raise ValueError("Password too long (max 128 characters)")
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password too long: bcrypt truncates at 72 bytes (use shorter)")
+        return v
+
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_length(cls, v: str) -> str:
+        if len(v) > 128:
+            raise ValueError("Password too long (max 128 characters)")
+        return v
 
 
 class Token(BaseModel):
