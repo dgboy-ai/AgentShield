@@ -36,11 +36,11 @@ export default function DashboardLayout({
   if (!token) return null;
 
   return (
-    <div className="min-h-screen" suppressHydrationWarning>
+    <div className="min-h-screen bg-[#050505]" suppressHydrationWarning>
       <CursorGlow />
       <Sidebar />
-      <main className="ml-[260px] p-8 min-h-screen relative z-10" suppressHydrationWarning>
-        <div className="max-w-6xl animate-stagger" suppressHydrationWarning>
+      <main className="ml-[240px] p-8 min-h-screen relative z-10" suppressHydrationWarning>
+        <div className="max-w-5xl animate-stagger" suppressHydrationWarning>
           {children}
         </div>
       </main>
