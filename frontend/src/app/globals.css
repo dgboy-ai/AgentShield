@@ -318,6 +318,23 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* ═══════════════════════════════════════════════════
+   REDUCED MOTION
+   ═══════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .animate-pulse { animation: none !important; }
+  .animate-float { animation: none !important; }
+  .animate-float-slow { animation: none !important; }
+  .hash-line { animation: none !important; }
+  .cursor-glow { display: none !important; }
+}
+
+/* ═══════════════════════════════════════════════════
    SCROLLBAR
    ═══════════════════════════════════════════════════ */
 

@@ -48,7 +48,6 @@ const TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
   scan: { bg: "rgba(245,158,11,0.08)", fg: "#D97706" },
 };
 
-const FALLBACK_COLORS = { bg: "rgba(0,0,0,0.04)", fg: "#5A5248" };
 // 2.3 Fix: deterministic color for unknown event types (no hardcoded grey)
 function hashColor(str: string): { bg: string; fg: string } {
   let h = 0;
@@ -58,14 +57,6 @@ function hashColor(str: string): { bg: string; fg: string } {
 }
 function getTypeColor(type: string) {
   return TYPE_COLORS[type] || hashColor(type);
-}
-function Tag({ label, colors }: { label: string; colors?: { bg: string; fg: string } }) {
-  const c = colors || FALLBACK_COLORS;
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide" style={{ background: c.bg, color: c.fg }}>
-      {label}
-    </span>
-  );
 }
 
 export default function DashboardPage() {
@@ -78,35 +69,38 @@ export default function DashboardPage() {
   const [compliance, setCompliance] = useState("UNKNOWN");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [c, m, t, cv, cr] = await Promise.all([
-        api.listConstraints(token),
-        api.listMemories(token),
-        api.auditTimeline(token),
-        api.auditVerify(token),
-        api.complianceReport(token).catch(() => ({ compliance_status: "UNKNOWN" })),
-      ]);
-      setConstraints(Array.isArray(c) ? c as unknown as Constraint[] : []);
-      setMemories(Array.isArray(m) ? m as unknown as Memory[] : []);
-      setAuditEntries(((t as Record<string, unknown>).entries || []) as unknown as AuditEntry[]);
-      setAuditEvents(((t as Record<string, unknown>).events_by_type || {}) as Record<string, number>);
-      // Handle both valid and is_valid for backward compat
-      const cvd = cv as Record<string, unknown>;
-      setChainValid((cvd.valid as boolean) ?? (cvd.is_valid as boolean) ?? false);
-      setCompliance((cr as Record<string, unknown>).compliance_status as string || "UNKNOWN");
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to load dashboard");
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
-
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!token) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const [c, m, t, cv, cr] = await Promise.all([
+          api.listConstraints(token),
+          api.listMemories(token),
+          api.auditTimeline(token),
+          api.auditVerify(token),
+          api.complianceReport(token).catch(() => ({ compliance_status: "UNKNOWN" })),
+        ]);
+        if (cancelled) return;
+        setConstraints(Array.isArray(c) ? c as unknown as Constraint[] : []);
+        setMemories(Array.isArray(m) ? m as unknown as Memory[] : []);
+        setAuditEntries(((t as Record<string, unknown>).entries || []) as unknown as AuditEntry[]);
+        setAuditEvents(((t as Record<string, unknown>).events_by_type || {}) as Record<string, number>);
+        const cvd = cv as Record<string, unknown>;
+        setChainValid((cvd.valid as boolean) ?? (cvd.is_valid as boolean) ?? false);
+        setCompliance((cr as Record<string, unknown>).compliance_status as string || "UNKNOWN");
+      } catch (e) {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : "Failed to load dashboard");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, reloadKey]);
 
   // 2.1 Real-time SSE: subscribe to audit stream for instant tamper alerts
   useEffect(() => {
@@ -132,6 +126,10 @@ export default function DashboardPage() {
     return () => es.close();
   }, [token]);
 
+  const reload = useCallback(() => {
+    setReloadKey((k) => k + 1);
+  }, []);
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -152,7 +150,7 @@ export default function DashboardPage() {
         <h1 className="text-3xl font-bold tracking-tight text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>Dashboard</h1>
         <div className="rounded-2xl p-10 text-center bg-rose-500/10 border border-rose-500/20 backdrop-blur">
           <p className="font-medium mb-4 text-rose-400">{error}</p>
-          <button onClick={load} className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-500 text-white tracking-widest uppercase">Try Again</button>
+          <button onClick={reload} className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-500 text-white tracking-widest uppercase">Try Again</button>
         </div>
       </div>
     );
@@ -191,7 +189,7 @@ export default function DashboardPage() {
           { label: "Constraints", value: constraints.length, color: "#10B981", link: "/dashboard/constraints" },
           { label: "Memories", value: memories.length, color: "#a78bfa", link: "/dashboard/memory" },
           { label: "Audit Events", value: totalEvents, color: "#f59e0b", link: "/dashboard/audit" },
-          { label: "Detection Patterns", value: 49, color: "#38bdf8", link: null },
+          { label: "Detection Patterns", value: 49, color: "#38bdf8", link: null, note: "Configured" },
         ].map((stat, i) => (
           <a
             key={stat.label}
@@ -203,6 +201,9 @@ export default function DashboardPage() {
               <AnimatedNumber value={stat.value} delay={i * 80} />
             </div>
             <div className="text-[10px] font-mono tracking-widest uppercase text-white/40">{stat.label}</div>
+            {'note' in stat && stat.note && (
+              <div className="text-[8px] font-mono tracking-widest uppercase text-white/25 mt-1">{stat.note}</div>
+            )}
             {stat.link && (
               <div className="mt-3 text-[9px] font-mono tracking-widest uppercase opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: stat.color }}>View all →</div>
             )}

@@ -60,7 +60,7 @@ export default function Docs() {
           <div className="rounded-2xl p-7 bg-white/70 backdrop-blur-md border border-black/5 shadow-sm">
             <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: "var(--font-space-grotesk)", color: "#1A1A1A" }}>Poisoning Detection</h2>
             <p className="text-gray-700 leading-relaxed">
-              45 OWASP ASI06 detection patterns across 7 categories catch known attack signatures before they reach agent memory.
+              49 OWASP ASI06 detection patterns across 7 categories catch known attack signatures before they reach agent memory.
             </p>
           </div>
 

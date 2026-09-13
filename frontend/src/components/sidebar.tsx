@@ -52,16 +52,20 @@ const NAV_ITEMS = [
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const { email, logout } = useAuth();
 
+  const handleNav = () => {
+    onNavigate?.();
+  };
+
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[240px] flex flex-col z-30 border-r border-white/6 bg-[#050505]/95 backdrop-blur-xl">
+    <aside className="w-[240px] h-full flex flex-col border-r border-white/6 bg-[#050505]/95 backdrop-blur-xl">
       {/* Logo */}
       <div className="px-5 pt-6 pb-5 border-b border-white/5">
-        <Link href="/dashboard" className="flex items-center gap-3 group">
+        <Link href="/dashboard" onClick={handleNav} className="flex items-center gap-3 group">
           <div className="w-8 h-8 rounded-lg bg-[#10B981] flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)] group-hover:shadow-[0_0_20px_rgba(16,185,129,0.5)] transition-all">
             <span className="font-bold text-black text-[10px]" style={{ fontFamily: "var(--font-space-grotesk)" }}>AS</span>
           </div>
@@ -85,7 +89,7 @@ export function Sidebar() {
               ? pathname === "/dashboard"
               : pathname.startsWith(item.href);
           return (
-            <Link key={item.href} href={item.href}>
+            <Link key={item.href} href={item.href} onClick={handleNav}>
               <div
                 className={`
                   flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium
@@ -109,23 +113,6 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Chain status */}
-      <div className="px-4 mb-3">
-        <div className="rounded-lg px-3 py-3 border border-white/5 bg-white/[0.02]">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
-            <span className="text-[9px] font-mono tracking-[0.2em] uppercase text-white/40">Chain Status</span>
-          </div>
-          <div className="h-px bg-gradient-to-r from-[#10B981]/40 via-[#10B981]/20 to-transparent mb-2" />
-          <div className="flex items-center gap-1.5">
-            <svg className="w-3 h-3 text-[#10B981]" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
-            <span className="text-[9px] font-mono tracking-wider uppercase text-[#10B981]/80">All linked &amp; verified</span>
-          </div>
-        </div>
-      </div>
-
       {/* User */}
       <div className="px-4 pb-5 border-t border-white/5 pt-3">
         <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/[0.04] transition-all cursor-pointer group">
@@ -133,7 +120,7 @@ export function Sidebar() {
             {email?.charAt(0).toUpperCase() || "U"}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-mono tracking-wider text-white/60 truncate">user</div>
+            <div className="text-[10px] font-mono tracking-wider text-white/60 truncate">{email || "user"}</div>
             <div className="text-[8px] font-mono tracking-widest uppercase text-white/30">Authenticated</div>
           </div>
           <button

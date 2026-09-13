@@ -4,7 +4,6 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { motion, useScroll, useTransform, useInView } from "framer-motion";
 import { useRef, useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
 const HeroShield = dynamic(() => import("@/components/hero-shield"), { ssr: false });
@@ -50,47 +49,156 @@ const PIPELINE_STEPS = [
   { label: "Audit", icon: "📋", color: "#10B981" },
 ];
 
-// ─── Live metrics from backend ───
-function LiveMetrics() {
-  const [metrics, setMetrics] = useState<{ constraints: number; memories: number; audit: number; patterns: number } | null>(null);
+// ─── System status (checks backend health) ───
+function SystemStatus({ className = "" }: { className?: string }) {
+  const [status, setStatus] = useState<"checking" | "online" | "offline">("checking");
 
   useEffect(() => {
-    // Try to load from localStorage token then call API
-    const token = typeof window !== "undefined" ? localStorage.getItem("agentshield_token") : null;
-    if (!token) return;
-    Promise.all([
-      api.dashboardStats(token).catch(() => null),
-    ]).then(([stats]) => {
-      if (stats) {
-        const s = stats as Record<string, unknown>;
-        setMetrics({
-          constraints: (s.active_constraints as number) ?? 0,
-          memories: (s.secured_memories as number) ?? 0,
-          audit: (s.total_audit_events as number) ?? 0,
-          patterns: (s.detection_patterns as number) ?? 0,
-        });
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await api.health();
+        if (!cancelled) setStatus(res?.status === "ok" || res?.status === "healthy" ? "online" : "offline");
+      } catch {
+        if (!cancelled) setStatus("offline");
       }
-    });
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  const config = {
+    checking: { text: "Checking System...", color: "#f59e0b", pulse: true },
+    online: { text: "System Online", color: "#10B981", pulse: true },
+    offline: { text: "System Offline", color: "#ef4444", pulse: false },
+  }[status];
+
+  return (
+    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border ${className}`}
+      style={{ background: `${config.color}10`, borderColor: `${config.color}20` }}>
+      <div className={`w-1.5 h-1.5 rounded-full ${config.pulse ? "animate-pulse" : ""}`}
+        style={{ background: config.color }} />
+      <span className="text-[10px] font-mono tracking-widest uppercase" style={{ color: config.color }}>
+        {config.text}
+      </span>
+    </div>
+  );
+}
+
+// ─── Live metrics from backend ───
+function LiveMetrics() {
+  const [metrics, setMetrics] = useState<{ constraints: number; memories: number; audit: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const token = typeof window !== "undefined" ? localStorage.getItem("agentshield_auth") : null;
+      if (!token) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(token);
+        const tok = parsed.token;
+        if (!tok) { if (!cancelled) setLoading(false); return; }
+
+        const [constraints, memories, audit] = await Promise.all([
+          api.listConstraints(tok, { limit: 1 }).catch(() => []),
+          api.listMemories(tok, { limit: 1 }).catch(() => []),
+          api.auditEntries(tok, { limit: "1" }).catch(() => ({ entries: [] })),
+        ]);
+
+        if (cancelled) return;
+        const cArr = Array.isArray(constraints) ? constraints : [];
+        const mArr = Array.isArray(memories) ? memories : [];
+        const aData = audit as Record<string, unknown>;
+        const aArr = Array.isArray(aData.entries) ? aData.entries : [];
+
+        setMetrics({
+          constraints: cArr.length,
+          memories: mArr.length,
+          audit: aArr.length,
+        });
+      } catch {
+        // Auth token invalid or backend unavailable
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const items = [
     { label: "Constraints", value: metrics?.constraints ?? 0, color: "#10B981" },
     { label: "Memories", value: metrics?.memories ?? 0, color: "#38bdf8" },
     { label: "Audit Events", value: metrics?.audit ?? 0, color: "#a78bfa" },
-    { label: "Detection Patterns", value: metrics?.patterns ?? 0, color: "#f59e0b" },
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-3 gap-4">
       {items.map((item) => (
         <div
           key={item.label}
           className="rounded-xl p-5 border border-white/5 bg-white/[0.03] text-center transition-all hover:bg-white/[0.06]"
         >
           <div className="text-3xl font-bold" style={{ fontFamily: "var(--font-space-grotesk)", color: item.color }}>
-            {item.value}
+            {loading ? (
+              <span className="inline-block w-8 h-7 rounded bg-white/5 animate-pulse" />
+            ) : (
+              item.value
+            )}
           </div>
           <div className="text-[10px] font-mono tracking-widest uppercase text-white/40 mt-1">{item.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Hero metrics (uses auth token to fetch real counts) ───
+function HeroMetrics() {
+  const [data, setData] = useState<{ constraints: number; memories: number; audit: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const token = typeof window !== "undefined" ? localStorage.getItem("agentshield_auth") : null;
+      if (!token) return;
+      try {
+        const parsed = JSON.parse(token);
+        const tok = parsed.token;
+        if (!tok) return;
+        const [c, m, a] = await Promise.all([
+          api.listConstraints(tok, { limit: 1 }).catch(() => []),
+          api.listMemories(tok, { limit: 1 }).catch(() => []),
+          api.auditEntries(tok, { limit: "1" }).catch(() => ({ entries: [] })),
+        ]);
+        if (cancelled) return;
+        const aData = a as Record<string, unknown>;
+        setData({
+          constraints: Array.isArray(c) ? c.length : 0,
+          memories: Array.isArray(m) ? m.length : 0,
+          audit: Array.isArray(aData.entries) ? aData.entries.length : 0,
+        });
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const metrics = [
+    { n: data?.constraints ?? 0, label: "Constraints" },
+    { n: data?.memories ?? 0, label: "Memories" },
+    { n: data?.audit ?? 0, label: "Audit Events" },
+  ];
+
+  return (
+    <div className={`mt-12 grid gap-4 border-t border-white/5 pt-8 ${data ? "grid-cols-3" : "grid-cols-3"}`}>
+      {metrics.map((m) => (
+        <div key={m.label}>
+          <div className="text-xl font-bold text-white/90" style={{ fontFamily: "var(--font-space-grotesk)" }}>{m.n}</div>
+          <div className="text-[9px] font-mono tracking-widest uppercase text-white/30 mt-0.5">{m.label}</div>
         </div>
       ))}
     </div>
@@ -116,18 +224,27 @@ export default function Home() {
             <span className="text-xs font-bold tracking-[0.2em] uppercase text-white/90" style={{ fontFamily: "var(--font-space-grotesk)" }}>AgentShield</span>
           </Link>
           <div className="hidden md:flex items-center gap-8">
-            {["Overview", "Technology", "Security", "Dashboard"].map((item) => (
-              <a key={item} href={item === "Dashboard" ? "/dashboard" : `#${item.toLowerCase()}`}
-                className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/50 hover:text-white transition-colors">
-                {item}
-              </a>
+            {[
+              { label: "Overview", href: "#overview" },
+              { label: "Technology", href: "#technology" },
+              { label: "Security", href: "#security" },
+              { label: "Dashboard", href: "/dashboard" },
+            ].map((item) => (
+              item.href.startsWith("/") ? (
+                <Link key={item.label} href={item.href}
+                  className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/50 hover:text-white transition-colors">
+                  {item.label}
+                </Link>
+              ) : (
+                <a key={item.label} href={item.href}
+                  className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/50 hover:text-white transition-colors">
+                  {item.label}
+                </a>
+              )
             ))}
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#10B981]/10 border border-[#10B981]/20">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
-              <span className="text-[10px] font-mono tracking-widest uppercase text-[#10B981]">System Online</span>
-            </div>
+            <SystemStatus className="hidden md:flex" />
             <Link href="/dashboard">
               <button className="px-4 py-2 rounded-lg bg-[#10B981] text-black text-[10px] font-bold tracking-[0.15em] uppercase hover:bg-[#34D399] transition-colors">
                 Open Dashboard
@@ -201,23 +318,12 @@ export default function Home() {
               </a>
             </motion.div>
 
-            {/* Metrics row */}
+            {/* Metrics row — real data if authenticated, empty states if not */}
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }}
               transition={{ duration: 1, delay: 0.6 }}
-              className="mt-12 grid grid-cols-4 gap-4 border-t border-white/5 pt-8"
             >
-              {[
-                { n: "0", label: "Constraints" },
-                { n: "0", label: "Memories" },
-                { n: "0", label: "Audit Events" },
-                { n: "0", label: "Detection Patterns" },
-              ].map((m) => (
-                <div key={m.label}>
-                  <div className="text-xl font-bold text-white/90" style={{ fontFamily: "var(--font-space-grotesk)" }}>{m.n}</div>
-                  <div className="text-[9px] font-mono tracking-widest uppercase text-white/30 mt-0.5">{m.label}</div>
-                </div>
-              ))}
+              <HeroMetrics />
             </motion.div>
           </div>
 
@@ -400,7 +506,7 @@ export default function Home() {
                   But memory<br />can be poisoned.
                 </h2>
                 <p className="text-white/50 text-base leading-relaxed mb-8">
-                  Attackers can inject misleading, harmful or manipulating information into an agent's memory through indirect prompts, tool outputs, or environmental data.
+                  Attackers can inject misleading, harmful or manipulating information into an agent&apos;s memory through indirect prompts, tool outputs, or environmental data.
                 </p>
                 <a href="#technology">
                   <button className="px-5 py-2.5 rounded-lg border border-white/10 text-xs font-mono tracking-widest uppercase text-white/60 hover:text-white hover:bg-white/5 transition-all">
@@ -456,7 +562,7 @@ export default function Home() {
               <div className="space-y-3">
                 {[
                   { icon: "📌", title: "Constraint Pinning", desc: "Quarantine safety rules from context compaction.", color: "#10B981" },
-                  { icon: "🔍", title: "Memory Poisoning Detection", desc: "49 OWASP ASI06 patterns across 7 categories.", color: "#10B981" },
+                  { icon: "🔍", title: "Memory Poisoning Detection", desc: "49 detection patterns configured across 7 categories.", color: "#10B981" },
                   { icon: "#", title: "SHA-256 Hash Chain", desc: "Cryptographically linked, tamper-evident chain.", color: "#10B981" },
                   { icon: "✍️", title: "Digital Signature Verification", desc: "ECDSA-P256 signatures via AWS KMS.", color: "#10B981" },
                   { icon: "📋", title: "Audit Trail", desc: "Hash-chained audit for every operation.", color: "#10B981" },
@@ -492,12 +598,12 @@ export default function Home() {
                   Zero-friction<br />protocol.
                 </h2>
                 <p className="text-white/50 text-base leading-relaxed mb-8">
-                  Secure your agent's memory pipeline in three steps. Constraint pinning ensures critical rules survive context compaction, while hash chains guarantee integrity.
+                  Secure your agent&apos;s memory pipeline in three steps. Constraint pinning ensures critical rules survive context compaction, while hash chains guarantee integrity.
                 </p>
                 <div className="space-y-4">
                   {[
                     { title: "Constraint Pinning", desc: "Quarantine safety rules from being overwritten." },
-                    { title: "Poisoning Detection", desc: "Scan inputs against 49 known attack patterns." },
+                    { title: "Poisoning Detection", desc: "Scan inputs against 49 configured attack patterns." },
                     { title: "Hash Chain Storage", desc: "Link memories cryptographically for tamper-evidence." },
                   ].map((f) => (
                     <div key={f.title} className="flex gap-3">
@@ -513,7 +619,7 @@ export default function Home() {
                 </div>
                 <div className="mt-8">
                   <p className="text-[10px] font-mono tracking-widest uppercase text-white/30 mb-2">Simple to integrate. Powerful protection.</p>
-                  <a href="/docs" className="text-xs text-[#10B981] hover:text-[#34D399] transition-colors font-mono tracking-wider">View Documentation →</a>
+                  <Link href="/docs" className="text-xs text-[#10B981] hover:text-[#34D399] transition-colors font-mono tracking-wider">View Documentation →</Link>
                 </div>
               </Reveal>
             </div>
@@ -531,11 +637,11 @@ export default function Home() {
                   </div>
                   <pre className="p-6 text-sm font-mono leading-relaxed overflow-x-auto text-white/60">
                     <span className="text-[#38bdf8]">from</span>{" agentshield "}<span className="text-[#38bdf8]">import</span>{" AgentShield\n\n"}
-                    {"shield = AgentShield("}<span className="text-[#10B981]">"http://localhost:8000"</span>{")\n\n"}
+                    {"shield = AgentShield("}<span className="text-[#10B981]">{`"http://localhost:8000"`}</span>{")\n\n"}
                     <span className="text-white/25"># 1. Pin critical constraint</span>{"\n"}
-                    {"shield.constraints.pin(\n  "}<span className="text-[#10B981]">"Never execute arbitrary commands"</span>{"\n)\n\n"}
+                    {"shield.constraints.pin(\n  "}<span className="text-[#10B981]">{`"Never execute arbitrary commands"`}</span>{"\n)\n\n"}
                     <span className="text-white/25"># 2. Store memory (auto hash-chained)</span>{"\n"}
-                    {"shield.memory.store(\n  "}<span className="text-[#10B981]">"User prefers strict validation"</span>{"\n)\n\n"}
+                    {"shield.memory.store(\n  "}<span className="text-[#10B981]">{`"User prefers strict validation"`}</span>{"\n)\n\n"}
                     <span className="text-white/25"># 3. Audit verification</span>{"\n"}
                     <span className="text-[#38bdf8]">assert</span>{" shield.audit.verify().valid"}
                   </pre>
@@ -593,7 +699,7 @@ export default function Home() {
                 See the memory defense<br />in action.
               </h2>
               <p className="text-white/50 text-base max-w-xl mx-auto">
-                The AgentShield Command Center gives you a real-time view of your agent's security posture. Every metric comes directly from the backend.
+                The AgentShield Command Center gives you a real-time view of your agent&apos;s security posture. Every metric comes directly from the backend.
               </p>
             </Reveal>
           </div>
@@ -610,6 +716,17 @@ export default function Home() {
                 </div>
               </div>
               <LiveMetrics />
+              <div className="mt-6 p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-[#38bdf8]/10 border border-[#38bdf8]/20 flex items-center justify-center text-sm shrink-0">
+                    🔍
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white/80 uppercase tracking-widest">Detection Patterns</div>
+                    <div className="text-xs text-white/40 mt-0.5">49 poisoning/manipulation detection patterns configured across 7 categories.</div>
+                  </div>
+                </div>
+              </div>
               <div className="mt-8 text-center">
                 <Link href="/dashboard">
                   <button className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#10B981] text-black text-xs font-bold tracking-[0.15em] uppercase hover:bg-[#34D399] hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] transition-all">
@@ -641,7 +758,7 @@ export default function Home() {
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#10B981] to-[#34D399]">trustworthy agents.</span>
             </h2>
             <p className="text-white/40 text-base mb-12 max-w-xl mx-auto">
-              Start using AgentShield to protect your agent's memory today.
+              Start using AgentShield to protect your agent&apos;s memory today.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/dashboard">
@@ -649,7 +766,7 @@ export default function Home() {
                   Open Dashboard →
                 </button>
               </Link>
-              <Link href="/register">
+              <Link href="/docs">
                 <button className="px-8 py-4 rounded-xl border border-white/10 text-white/70 text-xs font-bold tracking-[0.15em] uppercase hover:bg-white/5 hover:text-white transition-all">
                   Read the Docs
                 </button>
@@ -674,15 +791,13 @@ export default function Home() {
             <span className="text-[10px] font-mono text-white/30">A Tamper-Evident Memory Defense for LLM Agents</span>
           </div>
           <div className="flex items-center gap-6">
-            {["/dashboard", "/login"].map((href) => (
-              <Link key={href} href={href} className="text-[9px] font-mono tracking-widest uppercase text-white/30 hover:text-white/60 transition-colors">
-                {href.replace("/", "")}
-              </Link>
-            ))}
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
-              <span className="text-[9px] font-mono tracking-widest uppercase text-[#10B981]/70">System Online</span>
-            </div>
+            <Link href="/dashboard" className="text-[9px] font-mono tracking-widest uppercase text-white/30 hover:text-white/60 transition-colors">
+              Dashboard
+            </Link>
+            <Link href="/login" className="text-[9px] font-mono tracking-widest uppercase text-white/30 hover:text-white/60 transition-colors">
+              Login
+            </Link>
+            <SystemStatus />
           </div>
         </div>
       </footer>
