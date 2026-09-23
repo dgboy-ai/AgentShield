@@ -73,7 +73,7 @@ export default function DashboardLayout({
         <Sidebar onNavigate={closeSidebar} />
       </div>
       <main className="lg:ml-[240px] min-h-screen relative z-10">
-        <div className="p-4 sm:p-6 lg:p-8 max-w-[1200px] mx-auto">
+        <div className="p-4 sm:p-6 lg:p-8 xl:p-10 max-w-[1440px] mx-auto">
           <div className="animate-stagger" suppressHydrationWarning>
             {children}
           </div>
