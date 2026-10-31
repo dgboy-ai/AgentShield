@@ -21,7 +21,7 @@ interface ComplianceReport {
 }
 
 export default function CompliancePage() {
-  const { token, email, fullName, role } = useAuth();
+  const { token, email, fullName, role, loading: authLoading } = useAuth();
   const [report, setReport] = useState<ComplianceReport | null>(null);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +29,12 @@ export default function CompliancePage() {
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
-    if (!token) return;
+    if (!token) {
+      setFetching(false);
+      setIsForbidden(false);
+      setError("Authentication required. Please sign in.");
+      return;
+    }
     setFetching(true);
     setError(null);
     setIsForbidden(false);
@@ -37,7 +42,9 @@ export default function CompliancePage() {
       const data = await api.complianceReport(token);
       setReport(data as unknown as ComplianceReport);
     } catch (e) {
-      if (e instanceof ApiError && (e.status === 403 || String(e.message).toLowerCase().includes("admin"))) {
+      if (e instanceof ApiError && e.status === 403) {
+        setIsForbidden(true);
+      } else if (e instanceof ApiError && String(e.message).toLowerCase().includes("admin")) {
         setIsForbidden(true);
       } else {
         setError(e instanceof ApiError ? e.message : "Failed to load compliance report");
@@ -68,8 +75,8 @@ export default function CompliancePage() {
     }
   }
 
-  // ── Loading state ───────────────────────────────────────────────────────────
-  if (fetching) {
+  // ΓöÇΓöÇ Loading state ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  if (authLoading || fetching) {
     return (
       <div className="space-y-6 animate-fade-in pb-10">
         <div className="h-10 w-56 rounded-xl bg-white/[0.04] animate-pulse" />
@@ -87,7 +94,7 @@ export default function CompliancePage() {
     );
   }
 
-  // ── Access Denied screen for standard users (HTTP 403) ──────────────────────
+  // ΓöÇΓöÇ Access Denied screen for standard users (HTTP 403) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   if (isForbidden) {
     const userRoleDisplay = role ? role.toUpperCase() : "MEMBER";
     return (
@@ -112,9 +119,9 @@ export default function CompliancePage() {
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <span className="text-[10px] font-mono tracking-widest uppercase px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 font-bold">
-                  Role Restriction: Admin Only
+                  Requires role admin
                 </span>
-                <span className="text-[10px] font-mono text-white/30">HTTP 403 Forbidden</span>
+                <span className="text-[10px] font-mono text-white/30">Access Denied</span>
               </div>
 
               <h2 className="text-lg font-bold text-white mb-2" style={{ fontFamily: "var(--font-space-grotesk)" }}>
@@ -137,7 +144,7 @@ export default function CompliancePage() {
                     <span className="px-2 py-0.5 rounded bg-white/5 text-white/60 border border-white/10 text-[10px]">
                       {userRoleDisplay}
                     </span>
-                    <span className="text-amber-400/80 text-[10px]">→ Requires ADMIN</span>
+                    <span className="text-amber-400/80 text-[10px]">ΓåÆ Requires ADMIN</span>
                   </div>
                 </div>
                 <div>
@@ -156,13 +163,13 @@ export default function CompliancePage() {
                   href="/dashboard"
                   className="px-4 py-2 rounded-xl text-xs font-mono font-bold bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 transition-colors"
                 >
-                  ← Back to Overview
+                  ΓåÉ Back to Overview
                 </Link>
                 <Link
                   href="/dashboard/audit"
                   className="px-4 py-2 rounded-xl text-xs font-mono font-bold bg-[#10B981]/15 border border-[#10B981]/30 text-[#10B981] hover:bg-[#10B981]/25 transition-colors"
                 >
-                  View General Audit Trail →
+                  View General Audit Trail ΓåÆ
                 </Link>
                 <button
                   onClick={load}
@@ -178,7 +185,7 @@ export default function CompliancePage() {
     );
   }
 
-  // ── General Error state ─────────────────────────────────────────────────────
+  // ΓöÇΓöÇ General Error state ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   if (error) {
     return (
       <div className="space-y-6 animate-fade-in pb-10">
@@ -200,7 +207,7 @@ export default function CompliancePage() {
 
   if (!report) return null;
 
-  // ── Admin Authorized View (HTTP 200) ────────────────────────────────────────
+  // ΓöÇΓöÇ Admin Authorized View (HTTP 200) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   return (
     <div className="space-y-6 animate-slide-up pb-10">
       {/* Header */}
@@ -241,7 +248,7 @@ export default function CompliancePage() {
           Status: {report.compliance_status}
         </div>
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono text-white/40 border border-white/5">
-          Report ID: <span className="font-semibold text-white/60">{report.report_id.slice(0, 12)}…</span>
+          Report ID: <span className="font-semibold text-white/60">{report.report_id.slice(0, 12)}ΓÇª</span>
         </div>
       </div>
 
@@ -350,7 +357,7 @@ export default function CompliancePage() {
       </div>
 
       <div className="text-[10px] font-mono text-white/30 pt-2">
-        Generated At: {new Date(report.generated_at).toLocaleString()} · Cryptographic report digest verified
+        Generated At: {new Date(report.generated_at).toLocaleString()} ┬╖ Cryptographic report digest verified
       </div>
     </div>
   );

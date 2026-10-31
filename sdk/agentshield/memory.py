@@ -22,7 +22,7 @@ class MemoryManager:
         memory_type: str = "episodic",
         importance_score: float = 0.5,
         trust_level: float = 1.0,
-        source_provenance: str = "",
+        source_provenance: str = "user_input",
     ) -> Memory:
         """Store a memory. Blocked if pattern detection finds HIGH/CRITICAL matches.
 

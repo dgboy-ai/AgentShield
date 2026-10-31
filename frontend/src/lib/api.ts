@@ -39,35 +39,63 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     throw err;
   }
 
-  // 5.2: Handle 401 with httpOnly refresh (XSS mitigation)
+  // 5.2: Handle 401 with token refresh & fallback
   if (res.status === 401 && !path.includes("/auth/refresh") && !path.includes("/auth/login") && !path.includes("/auth/register")) {
     try {
-      const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        // Update localStorage with new access token if present
+      let storedRefreshToken: string | undefined;
+      let parsedAuth: Record<string, unknown> | null = null;
+      if (typeof window !== "undefined") {
         try {
           const saved = localStorage.getItem("agentshield_auth");
           if (saved) {
-            const parsed = JSON.parse(saved);
-            parsed.token = refreshData.access_token;
-            localStorage.setItem("agentshield_auth", JSON.stringify(parsed));
-            // Retry original request with new token
-            if (refreshData.access_token) headers["Authorization"] = `Bearer ${refreshData.access_token}`;
-            res = await fetch(`${API_BASE}${path}`, {
-              method: opts.method || "GET",
-              headers,
-              body: opts.body ? JSON.stringify(opts.body) : undefined,
-              credentials: "include",
-            });
-            if (res.ok) {
-              if (res.status === 204) return undefined as T;
-              return res.json();
-            }
+            parsedAuth = JSON.parse(saved);
+            storedRefreshToken = (parsedAuth?.refreshToken || parsedAuth?.refresh_token) as string | undefined;
           }
         } catch {}
       }
-    } catch {}
+
+      const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: storedRefreshToken ? JSON.stringify({ refresh_token: storedRefreshToken }) : undefined,
+        credentials: "include",
+      });
+
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        if (typeof window !== "undefined" && parsedAuth) {
+          parsedAuth.token = refreshData.access_token;
+          if (refreshData.refresh_token) parsedAuth.refreshToken = refreshData.refresh_token;
+          try { localStorage.setItem("agentshield_auth", JSON.stringify(parsedAuth)); } catch {}
+        }
+        if (refreshData.access_token) headers["Authorization"] = `Bearer ${refreshData.access_token}`;
+        res = await fetch(`${API_BASE}${path}`, {
+          method: opts.method || "GET",
+          headers,
+          body: opts.body ? JSON.stringify(opts.body) : undefined,
+          credentials: "include",
+        });
+        if (res.ok) {
+          if (res.status === 204) return undefined as T;
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            return res.json();
+          }
+          return (await res.text()) as unknown as T;
+        }
+      } else {
+        // Refresh failed: session expired
+        if (typeof window !== "undefined") {
+          try { localStorage.removeItem("agentshield_auth"); } catch {}
+          window.dispatchEvent(new CustomEvent("agentshield:auth-expired"));
+        }
+      }
+    } catch {
+      if (typeof window !== "undefined") {
+        try { localStorage.removeItem("agentshield_auth"); } catch {}
+        window.dispatchEvent(new CustomEvent("agentshield:auth-expired"));
+      }
+    }
   }
 
   if (!res.ok) {
