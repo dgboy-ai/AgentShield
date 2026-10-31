@@ -21,6 +21,38 @@ router = APIRouter(prefix="/api/memories", tags=["memories"])
 # Use shared singleton (fixes 3 separate engines)
 
 
+@router.get("/stats")
+def memory_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dep),
+):
+    org_id = str(current_user.org_id)
+    total = db.query(MemoryDB).filter(MemoryDB.org_id == current_user.org_id).count()
+    type_counts = {}
+    for row in db.query(MemoryDB.memory_type).filter(MemoryDB.org_id == current_user.org_id).all():
+        t = row[0]
+        type_counts[t] = type_counts.get(t, 0) + 1
+
+    chain_result = hash_chain.verify(org_id)
+    db_verify = _verify_db_chain(org_id, db)
+
+    try:
+        from app.routers.constraints import signing_engine
+        sig_stats = signing_engine.get_stats()
+    except Exception:
+        sig_stats = {"backend": "unknown", "fallback": True}
+
+    return {
+        "total_memories": total,
+        "type_counts": type_counts,
+        "chain_valid": chain_result.is_valid and db_verify["valid"],
+        "chain_total": db_verify.get("total_entries", 0),
+        "signing_backend": sig_stats.get("backend", "unknown"),
+        "signing_active": sig_stats.get("backend") == "local" or sig_stats.get("backend") == "aws_kms",
+        "signing_fallback": sig_stats.get("fallback", False),
+    }
+
+
 def _verify_db_chain(org_id: str, db: Session) -> dict:
     """
     DB-backed verification for 1.2: recomputes hashes from DB rows and checks

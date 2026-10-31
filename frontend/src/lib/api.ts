@@ -176,6 +176,8 @@ export const api = {
     const qs = params ? "?" + new URLSearchParams(Object.entries(params).reduce((acc, [k, v]) => { if (v !== undefined) acc[k] = String(v); return acc; }, {} as Record<string, string>)).toString() : "";
     return request<Record<string, unknown>[]>(`/api/memories${qs}`, { token });
   },
+  memoryStats: (token: string) =>
+    request<Record<string, unknown>>("/api/memories/stats", { token }),
   storeMemory: (token: string, content: string, memory_type: string) =>
     request<Record<string, unknown>>("/api/memories", {
       method: "POST",
@@ -184,6 +186,8 @@ export const api = {
     }),
   verifyMemories: (token: string) =>
     request<Record<string, unknown>>("/api/memories/chain/verify", { token }),
+  getMemory: (token: string, memoryId: string) =>
+    request<Record<string, unknown>>(`/api/memories/${memoryId}`, { token }),
 
   // Scan
   scanText: (token: string, text: string) =>
