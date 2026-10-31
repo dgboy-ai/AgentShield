@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
-import { useRef, useMemo, Suspense } from "react";
+import { useRef, useMemo, Suspense, useState, useEffect } from "react";
 import * as THREE from "three";
 
 // ultra-light dome - static + slow rotation only, no instance updates
@@ -53,15 +53,20 @@ function EdgeOrbs() {
 
 function Dust() {
   const count = 140;
-  const pos = useMemo(() => {
+  const [pos, setPos] = useState<Float32Array | null>(null);
+
+  useEffect(() => {
     const a = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      a[i*3]   = (Math.random() - 0.5) * 13;
-      a[i*3+1] = (Math.random() - 0.5) * 8;
-      a[i*3+2] = -1.5 - Math.random()*1.5;
+      a[i * 3] = (Math.random() - 0.5) * 13;
+      a[i * 3 + 1] = (Math.random() - 0.5) * 8;
+      a[i * 3 + 2] = -1.5 - Math.random() * 1.5;
     }
-    return a;
+    setPos(a);
   }, []);
+
+  if (!pos) return null;
+
   return (
     <points>
       <bufferGeometry>

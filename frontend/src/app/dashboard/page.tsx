@@ -74,8 +74,10 @@ export default function DashboardPage() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [auditEvents, setAuditEvents] = useState<Record<string, number>>({});
-  const [chainValid, setChainValid] = useState(true);
-  const [compliance, setCompliance] = useState("UNKNOWN");
+  const [chainValid, setChainValid] = useState<boolean | null>(null);
+  const [compliance, setCompliance] = useState("CHECKING");
+  const [patternsCount, setPatternsCount] = useState<number>(0);
+  const [signingBackend, setSigningBackend] = useState<string>("LOCAL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,21 +86,53 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [c, m, t, cv, cr] = await Promise.all([
+      const [c, m, t, cv, cr, patterns, health] = await Promise.allSettled([
         api.listConstraints(token),
         api.listMemories(token),
         api.auditTimeline(token),
         api.auditVerify(token),
-        api.complianceReport(token).catch(() => ({ compliance_status: "UNKNOWN" })),
+        api.complianceReport(token),
+        api.scanPatterns(token),
+        api.health(),
       ]);
-      setConstraints(Array.isArray(c) ? c as unknown as Constraint[] : []);
-      setMemories(Array.isArray(m) ? m as unknown as Memory[] : []);
-      setAuditEntries(((t as Record<string, unknown>).entries || []) as unknown as AuditEntry[]);
-      setAuditEvents(((t as Record<string, unknown>).events_by_type || {}) as Record<string, number>);
-      // Handle both valid and is_valid for backward compat
-      const cvd = cv as Record<string, unknown>;
-      setChainValid((cvd.valid as boolean) ?? (cvd.is_valid as boolean) ?? false);
-      setCompliance((cr as Record<string, unknown>).compliance_status as string || "UNKNOWN");
+
+      if (c.status === "fulfilled" && Array.isArray(c.value)) {
+        setConstraints(c.value as unknown as Constraint[]);
+      }
+      if (m.status === "fulfilled" && Array.isArray(m.value)) {
+        setMemories(m.value as unknown as Memory[]);
+      }
+      if (t.status === "fulfilled") {
+        const td = t.value as Record<string, unknown>;
+        setAuditEntries(((td.entries || []) as unknown as AuditEntry[]));
+        setAuditEvents(((td.events_by_type || {}) as Record<string, number>));
+      }
+      if (cv.status === "fulfilled") {
+        const cvd = cv.value as Record<string, unknown>;
+        setChainValid((cvd.valid as boolean) ?? (cvd.is_valid as boolean) ?? false);
+      } else {
+        setChainValid(false);
+      }
+      if (cr.status === "fulfilled") {
+        setCompliance((cr.value as Record<string, unknown>).compliance_status as string || "COMPLIANT");
+      } else {
+        const reason = cr.reason;
+        if (reason instanceof ApiError && reason.status === 403) {
+          setCompliance("RESTRICTED (ADMIN)");
+        } else {
+          setCompliance("UNAVAILABLE");
+        }
+      }
+      if (patterns.status === "fulfilled") {
+        const pd = patterns.value as Record<string, unknown>;
+        setPatternsCount(typeof pd.count === "number" ? pd.count : (Array.isArray(pd.patterns) ? pd.patterns.length : 0));
+      }
+      if (health.status === "fulfilled") {
+        const hd = health.value as Record<string, unknown>;
+        if (hd.signing && typeof hd.signing === "object") {
+          setSigningBackend((hd.signing as any).backend?.toUpperCase() || "LOCAL");
+        }
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load dashboard");
     } finally {
@@ -113,8 +147,6 @@ export default function DashboardPage() {
     if (!token) return;
     const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const es = new EventSource(`${base}/api/audit/stream`, { withCredentials: true } as unknown as EventSourceInit);
-    // Also try with token header via fetch-based SSE polyfill fallback: we use native EventSource which can't send Authorization header,
-    // so we rely on httpOnly cookie (if not present, fallback to polling)
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -126,7 +158,6 @@ export default function DashboardPage() {
       } catch {}
     };
     es.onerror = () => {
-      // Fallback to polling on error
       es.close();
     };
     return () => es.close();
@@ -135,12 +166,15 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="h-10 w-48 rounded-xl animate-pulse" style={{ background: "rgba(0,0,0,0.04)" }} />
-        <div className="grid grid-cols-4 gap-4">
-          {[1,2,3,4].map(i => <div key={i} className="h-24 rounded-xl animate-pulse" style={{ background: "rgba(0,0,0,0.03)" }} />)}
+        <div className="h-10 w-48 rounded-xl animate-pulse bg-white/5" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1,2,3,4].map(i => <div key={i} className="h-24 rounded-xl animate-pulse bg-white/5" />)}
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          {[1,2].map(i => <div key={i} className="h-64 rounded-xl animate-pulse" style={{ background: "rgba(0,0,0,0.03)" }} />)}
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+          {[1,2,3,4,5,6].map(i => <div key={i} className="h-20 rounded-xl animate-pulse bg-white/5" />)}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[1,2].map(i => <div key={i} className="h-64 rounded-xl animate-pulse bg-white/5" />)}
         </div>
       </div>
     );
@@ -149,16 +183,15 @@ export default function DashboardPage() {
   if (error) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <h1 className="text-3xl font-black font-display">Dashboard</h1>
-        <div className="glass-card rounded-2xl p-10 text-center">
-          <p className="font-medium mb-4" style={{ color: "#C23B3B" }}>{error}</p>
-          <button onClick={load} className="px-5 py-2.5 rounded-xl text-sm font-bold" style={{ background: "rgba(0,0,0,0.04)" }}>Try Again</button>
+        <h1 className="text-3xl font-bold tracking-tight text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>Command Center</h1>
+        <div className="rounded-2xl p-10 text-center bg-rose-500/10 border border-rose-500/20 backdrop-blur">
+          <p className="font-medium mb-4 text-rose-400">{error}</p>
+          <button onClick={load} className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-500 text-white tracking-widest uppercase hover:bg-rose-600 transition-colors">Try Again</button>
         </div>
       </div>
     );
   }
 
-  // 2.2 Fix: memoize heavy calculation to avoid UI freeze on large auditEvents
   const totalEvents = Object.values(auditEvents).reduce((a, b) => a + (b as number), 0);
   const maxAuditCount = (() => {
     const vals = Object.values(auditEvents).map(Number);
@@ -168,169 +201,238 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 animate-slide-up">
       {/* Header row */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-white/5">
         <div>
-          <h1 className="text-3xl font-black font-display tracking-tight">Dashboard</h1>
-          <p className="text-sm font-medium mt-1" style={{ color: "#5A5248" }}>AgentShield memory defense overview</p>
+          <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/30 mb-2">Memory Defense Overview</p>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>Command Center</h1>
+          <p className="text-sm text-white/40 mt-1">Real-time tamper defense &amp; hash chain monitoring</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold" style={chainValid ? { background: "rgba(16,185,129,0.1)", color: "#059669", border: "1px solid rgba(16,185,129,0.15)" } : { background: "rgba(194,59,59,0.1)", color: "#C23B3B", border: "1px solid rgba(194,59,59,0.15)" }}>
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: chainValid ? "#059669" : "#C23B3B", animation: "pulse-ring 2s ease-in-out infinite" }} />
-            Chain {chainValid ? "Valid" : "Broken"}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-mono tracking-widest uppercase border backdrop-blur ${chainValid ? 'bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]' : (chainValid === false ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-gray-500/10 border-gray-500/20 text-gray-400')}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${chainValid ? 'bg-[#10B981] animate-pulse' : (chainValid === false ? 'bg-rose-400' : 'bg-gray-400')}`} />
+            Chain {chainValid ? "Verified" : (chainValid === false ? "Broken" : "Checking")}
           </div>
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold" style={compliance === "COMPLIANT" ? { background: "rgba(16,185,129,0.1)", color: "#059669", border: "1px solid rgba(16,185,129,0.15)" } : { background: "rgba(245,158,11,0.1)", color: "#D97706", border: "1px solid rgba(245,158,11,0.15)" }}>
+          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-mono tracking-widest uppercase border ${compliance === 'COMPLIANT' ? 'bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]' : (compliance.includes('RESTRICTED') ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-white/5 border-white/10 text-white/50')}`}>
             {compliance}
           </div>
+          <button
+            onClick={load}
+            className="p-1.5 rounded-lg bg-white/[0.03] border border-white/10 text-white/50 hover:text-white hover:bg-white/[0.08] transition-all"
+            title="Refresh metrics"
+            aria-label="Refresh metrics"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+          </button>
         </div>
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "Constraints", value: constraints.length, icon: (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" /></svg>
-          ), color: "#059669", bg: "rgba(16,185,129,0.1)", link: "/dashboard/constraints" },
-          { label: "Memories", value: memories.length, icon: (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375" /></svg>
-          ), color: "#7C3AED", bg: "rgba(139,92,246,0.1)", link: "/dashboard/memory" },
-          { label: "Audit Events", value: totalEvents, icon: (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
-          ), color: "#D97706", bg: "rgba(245,158,11,0.1)", link: "/dashboard/audit" },
-          { label: "Patterns", value: 45, icon: (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
-          ), color: "#0284C7", bg: "rgba(14,165,233,0.1)", link: null },
+          { label: "Constraints", value: constraints.length, color: "#10B981", link: "/dashboard/constraints" },
+          { label: "Memories", value: memories.length, color: "#a78bfa", link: "/dashboard/memory" },
+          { label: "Audit Events", value: totalEvents, color: "#f59e0b", link: "/dashboard/audit" },
+          { label: "Detection Patterns", value: patternsCount, color: "#38bdf8", link: null },
         ].map((stat, i) => (
           <a
             key={stat.label}
             href={stat.link || "#"}
-            className={`glass-card rounded-xl p-4 group transition-all duration-300 hover:-translate-y-0.5 animate-slide-up ${stat.link ? "cursor-pointer" : "cursor-default"}`}
+            className={`rounded-xl p-5 border border-white/5 bg-white/[0.02] transition-all duration-200 hover:bg-white/[0.05] hover:border-white/10 ${stat.link ? 'cursor-pointer hover:-translate-y-0.5' : 'cursor-default'} group`}
             style={{ animationDelay: `${i * 60}ms` }}
           >
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center transition-transform duration-300 group-hover:scale-110" style={{ background: stat.bg, color: stat.color }}>
-                {stat.icon}
-              </div>
-              {stat.link && (
-                <svg className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-all duration-200 -translate-x-1 group-hover:translate-x-0" style={{ color: stat.color }} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                </svg>
-              )}
-            </div>
-            <div className="text-2xl font-black font-display tracking-tight" style={{ color: "#1A1A1A" }}>
+            <div className="text-3xl font-bold mb-1" style={{ fontFamily: "var(--font-space-grotesk)", color: stat.color }}>
               <AnimatedNumber value={stat.value} delay={i * 80} />
             </div>
-            <div className="text-[11px] font-bold tracking-wider uppercase mt-1" style={{ color: "#7A7164" }}>{stat.label}</div>
+            <div className="text-[10px] font-mono tracking-widest uppercase text-white/40">{stat.label}</div>
+            {stat.link && (
+              <div className="mt-3 text-[9px] font-mono tracking-widest uppercase opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: stat.color }}>View all →</div>
+            )}
           </a>
         ))}
       </div>
 
-      {/* Two-column: Recent Constraints + Recent Memories */}
-      <div className="grid grid-cols-2 gap-4">
-        {/* Constraints */}
-        <div className="glass-card rounded-xl overflow-hidden animate-slide-up" style={{ animationDelay: "200ms" }}>
-          <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "rgba(0,0,0,0.04)" }}>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full" style={{ background: "#059669" }} />
-              <span className="text-xs font-bold tracking-wider uppercase" style={{ color: "#5A5248" }}>Recent Constraints</span>
-            </div>
-            <a href="/dashboard/constraints" className="text-[11px] font-bold hover-underline" style={{ color: "#0D7C5F" }}>View all</a>
+      {/* SECURITY POSTURE */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        {[
+          { label: "Chain Integrity", status: chainValid ? "VERIFIED" : (chainValid === false ? "BROKEN" : "CHECKING"), color: chainValid ? "#10B981" : (chainValid === false ? "#F43F5E" : "#9CA3AF") },
+          { label: "Constraint Engine", status: `${constraints.length} PINNED`, color: "#10B981" },
+          { label: "Memory Defense", status: `${memories.length} STORED`, color: "#10B981" },
+          { label: "Threat Engine", status: `${patternsCount} PATTERNS`, color: "#38BDF8" },
+          { label: "Audit Trail", status: `${totalEvents} LOGGED`, color: "#F59E0B" },
+          { label: "Signing Backend", status: signingBackend, color: "#10B981" },
+        ].map((item) => (
+          <div key={item.label} className="rounded-xl border border-white/5 bg-white/[0.02] p-4 text-center group transition-colors hover:bg-white/[0.05]">
+            <div className="text-[10px] font-mono tracking-widest uppercase text-white/40 mb-2 h-8 flex items-center justify-center">{item.label}</div>
+            <div className="text-xs font-bold font-mono tracking-widest uppercase truncate" style={{ color: item.color }}>{item.status}</div>
           </div>
-          <div className="p-2">
+        ))}
+      </div>
+
+      {/* MEMORY DEFENSE PIPELINE */}
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden p-6 hidden md:block">
+        <div className="flex items-center gap-2 mb-6">
+          <div className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]" />
+          <span className="text-[10px] font-mono tracking-widest uppercase text-white/50">Memory Defense Pipeline</span>
+        </div>
+        <div className="flex items-center justify-between text-[9px] font-mono tracking-widest uppercase text-white/60">
+          <div className="flex flex-col items-center gap-2 flex-1 relative">
+            <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">1</div>
+            <span>Auth</span>
+            <div className="absolute right-0 top-4 w-1/2 h-px bg-gradient-to-r from-transparent to-white/10" />
+          </div>
+          <div className="flex flex-col items-center gap-2 flex-1 relative">
+            <div className="absolute left-0 top-4 w-1/2 h-px bg-gradient-to-r from-white/10 to-transparent" />
+            <div className="w-8 h-8 rounded-lg bg-[#10B981]/10 border border-[#10B981]/20 text-[#10B981] flex items-center justify-center">2</div>
+            <span>Constraint Check</span>
+            <div className="absolute right-0 top-4 w-1/2 h-px bg-gradient-to-r from-transparent to-white/10" />
+          </div>
+          <div className="flex flex-col items-center gap-2 flex-1 relative">
+            <div className="absolute left-0 top-4 w-1/2 h-px bg-gradient-to-r from-white/10 to-transparent" />
+            <div className="w-8 h-8 rounded-lg bg-[#38BDF8]/10 border border-[#38BDF8]/20 text-[#38BDF8] flex items-center justify-center">3</div>
+            <span>Poisoning Det.</span>
+            <div className="absolute right-0 top-4 w-1/2 h-px bg-gradient-to-r from-transparent to-white/10" />
+          </div>
+          <div className="flex flex-col items-center gap-2 flex-1 relative">
+            <div className="absolute left-0 top-4 w-1/2 h-px bg-gradient-to-r from-white/10 to-transparent" />
+            <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">4</div>
+            <span>Integrity Hash</span>
+            <div className="absolute right-0 top-4 w-1/2 h-px bg-gradient-to-r from-transparent to-white/10" />
+          </div>
+          <div className="flex flex-col items-center gap-2 flex-1 relative">
+            <div className="absolute left-0 top-4 w-1/2 h-px bg-gradient-to-r from-white/10 to-transparent" />
+            <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">5</div>
+            <span>Hash Chain</span>
+            <div className="absolute right-0 top-4 w-1/2 h-px bg-gradient-to-r from-transparent to-white/10" />
+          </div>
+          <div className="flex flex-col items-center gap-2 flex-1 relative">
+            <div className="absolute left-0 top-4 w-1/2 h-px bg-gradient-to-r from-white/10 to-transparent" />
+            <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center opacity-50">6</div>
+            <span className="opacity-50">Digital Sig.</span>
+            <div className="absolute right-0 top-4 w-1/2 h-px bg-gradient-to-r from-transparent to-white/10" />
+          </div>
+          <div className="flex flex-col items-center gap-2 flex-1 relative">
+            <div className="absolute left-0 top-4 w-1/2 h-px bg-gradient-to-r from-white/10 to-transparent" />
+            <div className="w-8 h-8 rounded-lg bg-[#8B5CF6]/10 border border-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center">7</div>
+            <span>Persist</span>
+            <div className="absolute right-0 top-4 w-1/2 h-px bg-gradient-to-r from-transparent to-white/10" />
+          </div>
+          <div className="flex flex-col items-center gap-2 flex-1 relative">
+            <div className="absolute left-0 top-4 w-1/2 h-px bg-gradient-to-r from-white/10 to-transparent" />
+            <div className="w-8 h-8 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/20 text-[#F59E0B] flex items-center justify-center">8</div>
+            <span>Audit</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Two-column: Recent Constraints + Recent Memories */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Constraints */}
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden flex flex-col min-h-[200px]">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/5">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
+              <span className="text-[10px] font-mono tracking-widest uppercase text-white/50">Recent Constraints</span>
+            </div>
+            <a href="/dashboard/constraints" className="text-[10px] font-mono tracking-widest uppercase text-[#10B981] hover:text-[#34D399] transition-colors">View all →</a>
+          </div>
+          <div className="p-2 flex-1">
             {constraints.length === 0 ? (
               <div className="py-8 text-center">
-                <p className="text-xs font-medium" style={{ color: "#7A7164" }}>No constraints pinned yet</p>
+                <p className="text-[10px] font-mono tracking-widest uppercase text-white/30">No constraints pinned yet</p>
               </div>
-            ) : constraints.slice(0, 4).map((c, i) => {
-              return (
-                <div key={c.constraint_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 hover:bg-white/40">
-                  <Tag label={c.constraint_type} colors={getTypeColor(c.constraint_type)} />
-                  <span className="text-xs font-medium truncate flex-1" style={{ color: "#1A1A1A" }}>{c.text}</span>
-                  <span className="text-[10px] shrink-0" style={{ color: "#7A7164" }}>{new Date(c.created_at).toLocaleDateString()}</span>
-                </div>
-              );
-            })}
+            ) : constraints.slice(0, 4).map((c) => (
+              <div key={c.constraint_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors">
+                <span className="text-[9px] font-mono tracking-widest uppercase px-2 py-0.5 rounded shrink-0" style={{ background: getTypeColor(c.constraint_type).bg, color: getTypeColor(c.constraint_type).fg }}>
+                  {c.constraint_type}
+                </span>
+                <span className="text-xs text-white/60 truncate flex-1">{c.text}</span>
+              </div>
+            ))}
           </div>
         </div>
 
         {/* Memories */}
-        <div className="glass-card rounded-xl overflow-hidden animate-slide-up" style={{ animationDelay: "260ms" }}>
-          <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "rgba(0,0,0,0.04)" }}>
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden flex flex-col min-h-[200px]">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/5">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full" style={{ background: "#7C3AED" }} />
-              <span className="text-xs font-bold tracking-wider uppercase" style={{ color: "#5A5248" }}>Recent Memories</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-[#a78bfa]" />
+              <span className="text-[10px] font-mono tracking-widest uppercase text-white/50">Recent Memories</span>
             </div>
-            <a href="/dashboard/memory" className="text-[11px] font-bold hover-underline" style={{ color: "#0D7C5F" }}>View all</a>
+            <a href="/dashboard/memory" className="text-[10px] font-mono tracking-widest uppercase text-[#10B981] hover:text-[#34D399] transition-colors">View all →</a>
           </div>
-          <div className="p-2">
+          <div className="p-2 flex-1">
             {memories.length === 0 ? (
               <div className="py-8 text-center">
-                <p className="text-xs font-medium" style={{ color: "#7A7164" }}>No memories stored yet</p>
+                <p className="text-[10px] font-mono tracking-widest uppercase text-white/30">No memories stored yet</p>
               </div>
-            ) : memories.slice(0, 4).map((m, i) => {
-              return (
-                <div key={m.memory_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 hover:bg-white/40">
-                  <Tag label={m.memory_type} colors={getTypeColor(m.memory_type)} />
-                  <span className="text-xs font-medium truncate flex-1" style={{ color: "#1A1A1A" }}>{m.content}</span>
-                  <span className="text-[10px] shrink-0" style={{ color: "#7A7164" }}>{new Date(m.created_at).toLocaleDateString()}</span>
-                </div>
-              );
-            })}
+            ) : memories.slice(0, 4).map((m) => (
+              <div key={m.memory_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors">
+                <span className="text-[9px] font-mono tracking-widest uppercase px-2 py-0.5 rounded shrink-0" style={{ background: getTypeColor(m.memory_type).bg, color: getTypeColor(m.memory_type).fg }}>
+                  {m.memory_type}
+                </span>
+                <span className="text-xs text-white/60 truncate flex-1">{m.content}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
       {/* Two-column: Audit Feed + Event Breakdown */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Audit feed */}
-        <div className="col-span-3 glass-card rounded-xl overflow-hidden animate-slide-up" style={{ animationDelay: "320ms" }}>
-          <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "rgba(0,0,0,0.04)" }}>
+        <div className="col-span-3 rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden flex flex-col min-h-[300px]">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/5">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full" style={{ background: "#D97706" }} />
-              <span className="text-xs font-bold tracking-wider uppercase" style={{ color: "#5A5248" }}>Audit Trail</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />
+              <span className="text-[10px] font-mono tracking-widest uppercase text-white/50">Recent Security Activity</span>
             </div>
-            <a href="/dashboard/audit" className="text-[11px] font-bold hover-underline" style={{ color: "#0D7C5F" }}>View all</a>
+            <a href="/dashboard/audit" className="text-[10px] font-mono tracking-widest uppercase text-[#10B981] hover:text-[#34D399] transition-colors">View all →</a>
           </div>
-          <div className="p-2">
+          <div className="p-2 flex-1">
             {auditEntries.length === 0 ? (
               <div className="py-8 text-center">
-                <p className="text-xs font-medium" style={{ color: "#7A7164" }}>No audit entries yet</p>
+                <p className="text-[10px] font-mono tracking-widest uppercase text-white/30">No audit entries yet</p>
               </div>
-            ) : auditEntries.slice(0, 5).map((e, i) => {
-              return (
-                <div key={e.entry_id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150 hover:bg-white/40">
-                  <Tag label={e.event_type} colors={getTypeColor(e.event_type)} />
-                  <span className="text-xs font-medium flex-1" style={{ color: "#1A1A1A" }}>{e.action}</span>
-                  <span className="text-[10px] shrink-0" style={{ color: "#7A7164" }}>{new Date(e.recorded_at).toLocaleTimeString()}</span>
+            ) : auditEntries.slice(0, 6).map((e) => (
+              <div key={e.entry_id} className="flex flex-col gap-1 px-4 py-3 rounded-lg hover:bg-white/5 transition-colors border-b border-white/[0.02] last:border-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-mono tracking-widest uppercase px-2 py-0.5 rounded" style={{ background: getTypeColor(e.event_type).bg, color: getTypeColor(e.event_type).fg }}>
+                    {e.event_type}
+                  </span>
+                  <span className="text-[10px] font-mono text-white/30">{new Date(e.recorded_at).toLocaleTimeString()}</span>
                 </div>
-              );
-            })}
+                <span className="text-xs text-white/70 mt-1">{e.action}</span>
+              </div>
+            ))}
           </div>
         </div>
 
         {/* Event breakdown */}
-        <div className="col-span-2 glass-card rounded-xl overflow-hidden animate-slide-up" style={{ animationDelay: "380ms" }}>
-          <div className="px-5 py-3.5 border-b" style={{ borderColor: "rgba(0,0,0,0.04)" }}>
+        <div className="col-span-2 rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-white/5">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full" style={{ background: "#0284C7" }} />
-              <span className="text-xs font-bold tracking-wider uppercase" style={{ color: "#5A5248" }}>Event Breakdown</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />
+              <span className="text-[10px] font-mono tracking-widest uppercase text-white/50">Event Breakdown</span>
             </div>
           </div>
-          <div className="p-4 space-y-3">
+          <div className="p-5 space-y-4">
             {Object.keys(auditEvents).length === 0 ? (
               <div className="py-6 text-center">
-                <p className="text-xs font-medium" style={{ color: "#7A7164" }}>No events recorded</p>
+                <p className="text-[10px] font-mono tracking-widest uppercase text-white/30">No events recorded</p>
               </div>
             ) : Object.entries(auditEvents).map(([type, count]) => {
               const colors = getTypeColor(type);
               const pct = ((count as number) / maxAuditCount) * 100;
               return (
                 <div key={type}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold" style={{ color: "#5A5248" }}>{type}</span>
-                    <span className="text-[11px] font-bold font-display" style={{ color: colors.fg }}>{count as number}</span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-mono tracking-widest uppercase text-white/60">{type}</span>
+                    <span className="text-[10px] font-mono font-bold" style={{ color: colors.fg }}>{count as number}</span>
                   </div>
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(0,0,0,0.04)" }}>
-                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: colors.fg, opacity: 0.6 }} />
+                  <div className="h-1.5 rounded-full overflow-hidden bg-white/5">
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: colors.fg, opacity: 0.8 }} />
                   </div>
                 </div>
               );

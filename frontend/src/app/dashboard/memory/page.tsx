@@ -14,10 +14,23 @@ interface Memory {
   created_at: string;
 }
 
+interface MemoryVerifyResult {
+  valid?: boolean;
+  is_valid?: boolean;
+  total_memories?: number;
+  broken_at?: number | null;
+}
+
+interface ThreatScanResult {
+  risk_score: number;
+  threat_detected: boolean;
+  patterns_matched: Array<{ category: string; severity: string; description: string }>;
+}
+
 const TYPE_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
-  episodic: { bg: "rgba(139,92,246,0.08)", text: "#7C3AED", border: "rgba(139,92,246,0.15)", label: "Episodic" },
-  semantic: { bg: "rgba(14,165,233,0.08)", text: "#0284C7", border: "rgba(14,165,233,0.15)", label: "Semantic" },
-  procedural: { bg: "rgba(245,158,11,0.08)", text: "#D97706", border: "rgba(245,158,11,0.15)", label: "Procedural" },
+  episodic: { bg: "rgba(167,139,250,0.1)", text: "#A78BFA", border: "rgba(167,139,250,0.2)", label: "Episodic" },
+  semantic: { bg: "rgba(56,189,248,0.1)", text: "#38BDF8", border: "rgba(56,189,248,0.2)", label: "Semantic" },
+  procedural: { bg: "rgba(245,158,11,0.1)", text: "#FBBF24", border: "rgba(245,158,11,0.2)", label: "Procedural" },
 };
 
 export default function MemoryPage() {
@@ -32,6 +45,12 @@ export default function MemoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [verifyResult, setVerifyResult] = useState<MemoryVerifyResult | null>(null);
+
+  // Scan state
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<ThreatScanResult | null>(null);
+
   const PAGE = 50;
 
   const load = useCallback(async (reset = true) => {
@@ -40,19 +59,59 @@ export default function MemoryPage() {
     setError(null);
     try {
       const off = reset ? 0 : offset;
-      const data = await api.listMemories(token, { limit: PAGE, offset: off });
-      const arr = data as unknown as Memory[];
-      if (reset) { setMemories(arr); setOffset(arr.length); setHasMore(arr.length >= PAGE); }
-      else { setMemories((prev) => [...prev, ...arr]); setOffset((o) => o + arr.length); setHasMore(arr.length >= PAGE); }
+      const [data, verify] = await Promise.allSettled([
+        api.listMemories(token, { limit: PAGE, offset: off }),
+        reset ? api.verifyMemories(token) : Promise.resolve(null),
+      ]);
+
+      if (data.status === "fulfilled") {
+        const arr = (Array.isArray(data.value) ? data.value : []) as unknown as Memory[];
+        if (reset) {
+          setMemories(arr);
+          setOffset(arr.length);
+          setHasMore(arr.length >= PAGE);
+        } else {
+          setMemories((prev) => [...prev, ...arr]);
+          setOffset((o) => o + arr.length);
+          setHasMore(arr.length >= PAGE);
+        }
+      } else {
+        throw data.reason;
+      }
+
+      if (verify.status === "fulfilled" && verify.value) {
+        setVerifyResult(verify.value as unknown as MemoryVerifyResult);
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load memories");
     } finally {
       setFetching(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, offset]);
 
-  useEffect(() => { load(true); }, [load]);
+  useEffect(() => { load(true); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleScan() {
+    if (!token || !content.trim()) return;
+    setScanning(true);
+    try {
+      const res = await api.scanText(token, content.trim()) as any;
+      setScanResult({
+        risk_score: res.risk_score ?? 0,
+        threat_detected: res.threat_detected ?? (res.risk_score > 0.4),
+        patterns_matched: res.matched_patterns || res.patterns_matched || [],
+      });
+      if (res.threat_detected || (res.risk_score && res.risk_score > 0.5)) {
+        toast.warning(`Threat scan: Risk score ${(res.risk_score * 100).toFixed(0)}%`);
+      } else {
+        toast.success("Threat scan passed: No malicious patterns detected");
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Scan failed");
+    } finally {
+      setScanning(false);
+    }
+  }
 
   async function handleStore(e: React.FormEvent) {
     e.preventDefault();
@@ -61,10 +120,11 @@ export default function MemoryPage() {
     try {
       await api.storeMemory(token, content.trim(), type);
       setContent("");
-      toast.success("Memory stored with hash chain integrity");
+      setScanResult(null);
+      toast.success("Memory stored with SHA-256 hash-chain integrity");
       load(true);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed");
+      toast.error(err instanceof ApiError ? err.message : "Failed to store memory");
     } finally {
       setLoading(false);
     }
@@ -76,131 +136,234 @@ export default function MemoryPage() {
     return true;
   });
 
+  const isChainValid = verifyResult?.valid ?? verifyResult?.is_valid;
+
   return (
-    <div className="space-y-8 animate-slide-up">
-      <div>
-        <h1 className="text-4xl font-black font-display tracking-tight">Memory</h1>
-        <p className="mt-2 text-base font-medium" style={{ color: "#5A5248" }}>
-          Store memories with SHA-256 hash chain integrity
-        </p>
+    <div className="space-y-6 animate-slide-up pb-10">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/5">
+        <div>
+          <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/30 mb-2">Memory Defense</p>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+            Memory Store
+          </h1>
+          <p className="text-sm text-white/40 mt-1">
+            Store and verify agent episodic, semantic, and procedural memories with cryptographic hash chains.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {verifyResult && (
+            <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-mono tracking-widest uppercase border ${
+              isChainValid ? "bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+            }`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${isChainValid ? "bg-[#10B981] animate-pulse" : "bg-rose-400"}`} />
+              Chain {isChainValid ? "Verified" : "Tampered"}
+            </div>
+          )}
+          <span className="text-[10px] font-mono tracking-widest uppercase px-3 py-1.5 rounded-lg bg-white/5 text-white/60 border border-white/10">
+            {memories.length} Entries
+          </span>
+        </div>
       </div>
 
-      <div className="glass-card rounded-2xl p-6">
+      {/* Store Memory Form */}
+      <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
         <div className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(139,92,246,0.12)" }}>
-            <svg className="w-5 h-5" style={{ color: "#7C3AED" }} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <div className="w-8 h-8 rounded-lg bg-[#8B5CF6]/10 border border-[#8B5CF6]/20 flex items-center justify-center">
+            <svg className="w-4 h-4 text-[#A78BFA]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
           </div>
-          <h2 className="text-sm font-bold font-display" style={{ color: "#1A1A1A" }}>Store New Memory</h2>
+          <h2 className="text-sm font-semibold text-white tracking-wide">Store New Memory</h2>
         </div>
-        <form onSubmit={handleStore} className="space-y-3">
-          <input
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="e.g. User prefers dark mode and works late nights"
-            className="w-full px-4 py-3 rounded-xl text-sm font-medium transition-all duration-250"
-            style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }}
-          />
-          <div className="flex items-center gap-3">
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              className="px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-250"
-              style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }}
-            >
-              <option value="episodic">Episodic</option>
-              <option value="semantic">Semantic</option>
-              <option value="procedural">Procedural</option>
-            </select>
-            <button
-              type="submit"
-              disabled={loading || !content.trim()}
-              className="px-6 py-3 rounded-xl text-sm font-bold text-white transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ background: "linear-gradient(135deg, #0D7C5F, #10B981)", boxShadow: "0 2px 12px rgba(13,124,95,0.25)" }}
-            >
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Storing...
-                </span>
-              ) : "Store Memory"}
-            </button>
+        <form onSubmit={handleStore} className="space-y-4">
+          <div>
+            <textarea
+              value={content}
+              onChange={(e) => {
+                setContent(e.target.value);
+                if (scanResult) setScanResult(null);
+              }}
+              rows={3}
+              placeholder="e.g. Agent preferences: Database connection string must always use sslmode=verify-full."
+              className="w-full px-4 py-3 rounded-xl text-sm font-medium bg-white/[0.03] border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-[#10B981] transition-colors resize-none"
+            />
           </div>
-          <p className="text-xs font-medium" style={{ color: "#7A7164" }}>
-            Content is scanned for injection patterns before storage
-          </p>
+
+          {/* Pre-store scan feedback if available */}
+          {scanResult && (
+            <div className={`p-4 rounded-xl text-xs font-mono border ${
+              scanResult.threat_detected ? "bg-rose-500/10 border-rose-500/20 text-rose-300" : "bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]"
+            }`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-bold uppercase tracking-wider">
+                  {scanResult.threat_detected ? "Threat Detected" : "Threat Scan Clean"}
+                </span>
+                <span>Risk: {(scanResult.risk_score * 100).toFixed(0)}%</span>
+              </div>
+              {scanResult.patterns_matched.length > 0 && (
+                <div className="mt-2 space-y-1 text-white/70">
+                  {scanResult.patterns_matched.map((p, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-rose-400">[{p.severity}]</span>
+                      <span>{p.category}: {p.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] font-mono tracking-widest uppercase text-white/40 shrink-0">Memory Type:</label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="px-3 py-2 rounded-xl text-xs font-mono font-medium bg-[#121212] border border-white/10 text-white focus:outline-none focus:border-[#10B981]"
+              >
+                <option value="episodic">Episodic</option>
+                <option value="semantic">Semantic</option>
+                <option value="procedural">Procedural</option>
+              </select>
+            </div>
+
+            <div className="sm:ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleScan}
+                disabled={scanning || !content.trim()}
+                className="px-4 py-2.5 rounded-xl text-xs font-mono font-bold bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {scanning ? "Scanning..." : "Scan for Threat"}
+              </button>
+              <button
+                type="submit"
+                disabled={loading || !content.trim()}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-[#10B981] text-black hover:bg-[#34D399] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-black border-t-transparent animate-spin" />
+                    <span>Storing...</span>
+                  </>
+                ) : (
+                  "Store Memory"
+                )}
+              </button>
+            </div>
+          </div>
         </form>
       </div>
 
+      {/* Filter and Search Bar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="flex-1 relative">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search stored memory content..."
+            className="w-full pl-9 pr-4 py-2.5 rounded-xl text-xs font-medium bg-white/[0.03] border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-[#10B981]"
+          />
+          <svg className="w-4 h-4 text-white/30 absolute left-3 top-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+        </div>
+        <div className="flex items-center gap-2">
+          {["", "episodic", "semantic", "procedural"].map((t) => (
+            <button
+              key={t}
+              onClick={() => setFilterType(t)}
+              className={`px-3 py-2 rounded-xl text-[10px] font-mono tracking-wider uppercase transition-colors border ${
+                filterType === t
+                  ? "bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30 font-bold"
+                  : "bg-white/[0.02] text-white/40 border-white/5 hover:text-white/70"
+              }`}
+            >
+              {t === "" ? "All" : t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Error State */}
       {error && (
-        <div className="glass-card rounded-2xl p-6 text-center" style={{ background: "rgba(194,59,59,0.04)", border: "1px solid rgba(194,59,59,0.12)" }}>
-          <p className="text-sm font-medium mb-3" style={{ color: "#C23B3B" }}>{error}</p>
-          <button onClick={() => load(true)} className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: "rgba(0,0,0,0.04)" }}>Retry</button>
+        <div className="rounded-2xl p-5 border border-rose-500/20 bg-rose-500/10 text-center">
+          <p className="text-xs font-mono text-rose-400 mb-3">{error}</p>
+          <button onClick={() => load(true)} className="px-4 py-1.5 rounded-lg text-xs font-mono font-bold bg-white/5 text-white/70 hover:bg-white/10">
+            Retry
+          </button>
         </div>
       )}
 
-      {/* search + filter */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search memories..." className="flex-1 min-w-[200px] px-4 py-2.5 rounded-xl text-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)" }} />
-        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-3 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)" }}>
-          <option value="">All types</option><option value="episodic">Episodic</option><option value="semantic">Semantic</option><option value="procedural">Procedural</option>
-        </select>
-      </div>
-
+      {/* Loading Skeletons */}
       {fetching && (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-24 rounded-2xl animate-pulse" style={{ background: "rgba(0,0,0,0.03)" }} />
+            <div key={i} className="h-20 rounded-xl bg-white/[0.03] animate-pulse" />
           ))}
         </div>
       )}
 
+      {/* Empty State */}
       {!fetching && !error && filtered.length === 0 && (
-        <div className="glass-card rounded-2xl p-14 text-center">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5" style={{ background: "rgba(0,0,0,0.03)" }}>
-            <svg className="w-8 h-8" style={{ color: "#7A7164" }} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375" />
+        <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-12 text-center">
+          <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-center mx-auto mb-4 text-white/30">
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
             </svg>
           </div>
-          <p className="font-bold font-display" style={{ color: "#1A1A1A" }}>{memories.length === 0 ? "No memories stored yet" : "No matches"}</p>
-          <p className="text-xs mt-1" style={{ color: "#7A7164" }}>{memories.length === 0 ? "Store your first memory above" : "Try a different search or filter"}</p>
+          <p className="text-sm font-semibold text-white/80">
+            {search || filterType ? "No matching memories found" : "No memories stored yet"}
+          </p>
+          <p className="text-xs text-white/40 mt-1">
+            {search || filterType ? "Try adjusting your filter or search query." : "Store your first memory entry above to establish the hash chain."}
+          </p>
         </div>
       )}
 
-      {!fetching && filtered.map((m, i) => {
-        const style = TYPE_STYLES[m.memory_type] || TYPE_STYLES.episodic;
-        return (
-          <div
-            key={m.memory_id}
-            className="glass-card rounded-2xl p-5 animate-slide-up"
-            style={{ animationDelay: `${i * 60}ms` }}
-          >
-            <p className="text-sm font-bold" style={{ color: "#1A1A1A" }}>{m.content}</p>
-            <div className="flex items-center gap-2.5 mt-3">
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold" style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}>
-                {style.label}
-              </span>
-              <span className="text-[11px] font-mono" style={{ color: "#7A7164" }}>
-                {m.entry_hash?.slice(0, 16)}...
-              </span>
-              <span className="text-[11px]" style={{ color: "#7A7164" }}>
-                {new Date(m.created_at).toLocaleDateString()}
-              </span>
+      {/* Memory List */}
+      <div className="space-y-3">
+        {!fetching && filtered.map((m) => {
+          const style = TYPE_STYLES[m.memory_type] || TYPE_STYLES.episodic;
+          return (
+            <div
+              key={m.memory_id}
+              className="rounded-xl border border-white/5 bg-white/[0.02] p-4 transition-all hover:bg-white/[0.04] hover:border-white/10"
+            >
+              <p className="text-sm text-white/90 leading-relaxed font-medium">{m.content}</p>
+              <div className="flex items-center gap-3 mt-3 flex-wrap">
+                <span
+                  className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider uppercase"
+                  style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}
+                >
+                  {style.label}
+                </span>
+                {m.entry_hash && (
+                  <span className="text-[10px] font-mono text-white/30 truncate" title={`SHA-256: ${m.entry_hash}`}>
+                    {m.entry_hash.slice(0, 10)}…{m.entry_hash.slice(-6)}
+                  </span>
+                )}
+                <span className="text-[10px] font-mono text-white/30">
+                  {new Date(m.created_at).toLocaleDateString()} {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
             </div>
-          </div>
-        );
-      })}
-      {!fetching && hasMore && filtered.length > 0 && (
-        <div className="flex justify-center">
-          <button onClick={() => load(false)} className="px-5 py-2.5 rounded-xl text-xs font-bold" style={{ background: "rgba(13,124,95,0.08)", color: "#0D7C5F" }}>Load More ({memories.length} loaded)</button>
+          );
+        })}
+      </div>
+
+      {!fetching && hasMore && memories.length >= 50 && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={() => load(false)}
+            className="px-4 py-2 rounded-xl text-xs font-mono font-bold border border-white/10 bg-white/[0.02] text-white/70 hover:bg-white/5 transition-colors"
+          >
+            Load More ({memories.length} loaded)
+          </button>
         </div>
       )}
     </div>
   );
 }
-
-

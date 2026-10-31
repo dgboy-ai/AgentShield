@@ -35,9 +35,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       className={`${dmSans.variable} ${spaceGrotesk.variable} ${jetBrainsMono.variable} h-full antialiased`}
-      suppressHydrationWarning
+      data-scroll-behavior="smooth"
     >
-      <body className="min-h-full flex flex-col mesh-bg grain-overlay" suppressHydrationWarning>
+      <body className="min-h-full flex flex-col mesh-bg grain-overlay">
         {/* Fix for BIS/Samsung Internet extension injecting bis_skin_checked causing hydration mismatch (dev-only, HotReload) */}
         <script
           dangerouslySetInnerHTML={{

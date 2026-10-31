@@ -24,12 +24,20 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
-  let res = await fetch(`${API_BASE}${path}`, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-    credentials: "include", // for httpOnly refresh/access cookies
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: opts.method || "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      credentials: "include", // for httpOnly refresh/access cookies
+    });
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "TypeError" && err.message.includes("fetch")) {
+      throw new ApiError("Backend unavailable", 503, { error: err.message });
+    }
+    throw err;
+  }
 
   // 5.2: Handle 401 with httpOnly refresh (XSS mitigation)
   if (res.status === 401 && !path.includes("/auth/refresh") && !path.includes("/auth/login") && !path.includes("/auth/register")) {
@@ -76,12 +84,16 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return res.json();
+  }
+  return (await res.text()) as unknown as T;
 }
 
 export const api = {
   // Health
-  health: () => request<{ status: string; db: string }>("/health"),
+  health: () => request<{ status: string; db: string; engine?: string; signing?: Record<string, unknown> }>("/health"),
 
   // Auth
   register: (email: string, password: string, full_name: string) =>
@@ -102,7 +114,7 @@ export const api = {
   logout: () =>
     request<{ status: string }>("/api/auth/logout", { method: "POST" }),
   me: (token: string) =>
-    request<{ user_id: string; email: string; full_name: string; org_id: string }>(
+    request<{ user_id: string; email: string; full_name: string; role: string; org_id: string }>(
       "/api/auth/me",
       { token }
     ),
@@ -172,4 +184,6 @@ export const api = {
     request<Record<string, unknown>>("/api/audit/compliance/report", { token }),
   exportJsonl: (token: string) =>
     request<string>("/api/audit/export/jsonl", { token }),
+  exportCsv: (token: string) =>
+    request<string>("/api/audit/export/csv", { token }),
 };

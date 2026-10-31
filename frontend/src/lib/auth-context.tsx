@@ -8,6 +8,8 @@ interface AuthState {
   userId: string | null;
   orgId: string | null;
   email: string | null;
+  fullName: string | null;
+  role: string | null;
   loading: boolean;
 }
 
@@ -16,6 +18,7 @@ interface AuthContextType extends AuthState {
   register: (email: string, password: string, fullName: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<boolean>;
+  loadProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -26,77 +29,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     userId: null,
     orgId: null,
     email: null,
+    fullName: null,
+    role: null,
     loading: true,
   });
 
-  useEffect(() => {
-    // Try httpOnly cookie refresh first (secure), fallback to localStorage for backward compat
-    const tryRefresh = async () => {
-      try {
-        const res = await api.refresh();
-        setState({ token: res.access_token, userId: res.user_id, orgId: res.org_id, email: null, loading: false });
-        // Also update localStorage for compat but token is now httpOnly primary
-        localStorage.setItem("agentshield_auth", JSON.stringify({ token: res.access_token, userId: res.user_id, orgId: res.org_id, email: null, loading: false }));
-        return;
-      } catch {}
-      const saved = localStorage.getItem("agentshield_auth");
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          // Validate token not expired by trying /me
-          try {
-            await api.me(parsed.token);
-            setState({ ...parsed, loading: false });
-          } catch {
-            // Token expired, try refresh via cookie
-            const ok = await refresh();
-            if (!ok) setState((s) => ({ ...s, loading: false }));
-          }
-        } catch {
-          setState((s) => ({ ...s, loading: false }));
-        }
-      } else {
-        setState((s) => ({ ...s, loading: false }));
-      }
-    };
-    tryRefresh();
-  }, []);
-
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await api.login(email, password);
-    const newState = {
-      token: res.access_token,
-      userId: res.user_id,
-      orgId: res.org_id,
-      email,
-      loading: false,
-    };
-    setState(newState);
-    // httpOnly cookie is primary; localStorage kept only for backward-compat header fallback (cleared on logout)
-    try { localStorage.setItem("agentshield_auth", JSON.stringify(newState)); } catch {}
-  }, []);
-
-  const register = useCallback(async (email: string, password: string, fullName: string) => {
-    const res = await api.register(email, password, fullName);
-    const newState = {
-      token: res.access_token,
-      userId: res.user_id,
-      orgId: res.org_id,
-      email,
-      loading: false,
-    };
-    setState(newState);
-    try { localStorage.setItem("agentshield_auth", JSON.stringify(newState)); } catch {}
-  }, []);
+  const fetchUserProfile = async (token: string, base: Partial<AuthState>) => {
+    try {
+      const me = await api.me(token);
+      return {
+        ...base,
+        token,
+        userId: me.user_id,
+        orgId: me.org_id,
+        email: me.email,
+        fullName: me.full_name,
+        role: me.role,
+        loading: false,
+      };
+    } catch {
+      return {
+        ...base,
+        token,
+        loading: false,
+      };
+    }
+  };
 
   const refresh = useCallback(async () => {
     try {
       const res = await api.refresh();
+      let role: string | null = null;
+      let fullName: string | null = null;
+      let email: string | null = null;
+      try {
+        const me = await api.me(res.access_token);
+        role = me.role;
+        fullName = me.full_name;
+        email = me.email;
+      } catch {}
       setState((s) => {
-        if (!s.token) return s;
-        const ns = { ...s, token: res.access_token, userId: res.user_id, orgId: res.org_id };
-        localStorage.setItem("agentshield_auth", JSON.stringify({ ...ns, loading: false }));
-        return { ...ns, loading: false };
+        const ns: AuthState = {
+          ...s,
+          token: res.access_token,
+          userId: res.user_id,
+          orgId: res.org_id,
+          email: email || s.email,
+          fullName: fullName || s.fullName,
+          role: role || s.role,
+          loading: false,
+        };
+        localStorage.setItem("agentshield_auth", JSON.stringify(ns));
+        return ns;
       });
       return true;
     } catch {
@@ -104,16 +88,117 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    const tryRefresh = async () => {
+      try {
+        const res = await api.refresh();
+        const full = await fetchUserProfile(res.access_token, {
+          userId: res.user_id,
+          orgId: res.org_id,
+        });
+        setState(full as AuthState);
+        localStorage.setItem("agentshield_auth", JSON.stringify(full));
+        return;
+      } catch {}
+
+      const saved = localStorage.getItem("agentshield_auth");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.token) {
+            try {
+              const me = await api.me(parsed.token);
+              const updated = {
+                ...parsed,
+                email: me.email,
+                fullName: me.full_name,
+                role: me.role,
+                userId: me.user_id,
+                orgId: me.org_id,
+                loading: false,
+              };
+              setState(updated);
+              localStorage.setItem("agentshield_auth", JSON.stringify(updated));
+              return;
+            } catch {
+              const ok = await refresh();
+              if (!ok) setState((s) => ({ ...s, loading: false }));
+              return;
+            }
+          }
+        } catch {
+          setState((s) => ({ ...s, loading: false }));
+        }
+      }
+      setState((s) => ({ ...s, loading: false }));
+    };
+    tryRefresh();
+  }, [refresh]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const res = await api.login(email, password);
+    const fullState: AuthState = {
+      token: res.access_token,
+      userId: res.user_id,
+      orgId: res.org_id,
+      email,
+      fullName: null,
+      role: null,
+      loading: false,
+    };
+    try {
+      const me = await api.me(res.access_token);
+      fullState.fullName = me.full_name;
+      fullState.role = me.role;
+      fullState.email = me.email;
+    } catch {}
+    setState(fullState);
+    try { localStorage.setItem("agentshield_auth", JSON.stringify(fullState)); } catch {}
+  }, []);
+
+  const register = useCallback(async (email: string, password: string, fullName: string) => {
+    const res = await api.register(email, password, fullName);
+    const fullState: AuthState = {
+      token: res.access_token,
+      userId: res.user_id,
+      orgId: res.org_id,
+      email,
+      fullName,
+      role: "user",
+      loading: false,
+    };
+    try {
+      const me = await api.me(res.access_token);
+      fullState.role = me.role;
+      fullState.fullName = me.full_name;
+    } catch {}
+    setState(fullState);
+    try { localStorage.setItem("agentshield_auth", JSON.stringify(fullState)); } catch {}
+  }, []);
+
+
+  const loadProfile = useCallback(async () => {
+    if (!state.token) return;
+    try {
+      const me = await api.me(state.token);
+      setState((s) => {
+        const ns = { ...s, email: me.email, fullName: me.full_name, role: me.role };
+        localStorage.setItem("agentshield_auth", JSON.stringify(ns));
+        return ns;
+      });
+    } catch {}
+  }, [state.token]);
+
   const logout = useCallback(async () => {
     try {
       await api.logout();
     } catch {}
-    setState({ token: null, userId: null, orgId: null, email: null, loading: false });
+    setState({ token: null, userId: null, orgId: null, email: null, fullName: null, role: null, loading: false });
     localStorage.removeItem("agentshield_auth");
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, register, logout, refresh }}>
+    <AuthContext.Provider value={{ ...state, login, register, logout, refresh, loadProfile }}>
       {children}
     </AuthContext.Provider>
   );
