@@ -1,18 +1,27 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { CursorGlow } from "@/components/cursor-glow";
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, token, loading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const sessionExpired = searchParams.get("expired") === "1";
+
+  // If already authenticated, redirect to dashboard
+  useEffect(() => {
+    if (!authLoading && token) {
+      router.push("/dashboard");
+    }
+  }, [authLoading, token, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +52,19 @@ export default function LoginPage() {
             Log in to AgentShield
           </p>
         </div>
+
+        {/* Session expired banner */}
+        {sessionExpired && (
+          <div className="mb-4 rounded-xl px-4 py-3 flex items-start gap-3" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+            <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="#f87171">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <div>
+              <p className="text-sm font-bold" style={{ color: "#f87171" }}>Session Expired</p>
+              <p className="text-xs mt-0.5" style={{ color: "#5A5248" }}>Your session has timed out. Please sign in again to continue.</p>
+            </div>
+          </div>
+        )}
 
         <div className="glass-card rounded-3xl p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -99,5 +121,17 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#F8F4ED" }}>
+        <div className="w-8 h-8 border-2 border-[#10B981] border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }

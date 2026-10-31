@@ -17,10 +17,14 @@ export default function DashboardLayout({
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Redirect to login when not authenticated
   useEffect(() => {
-    if (!loading && !token) router.push("/login");
+    if (!loading && !token) {
+      router.push("/login");
+    }
   }, [loading, token, router]);
 
+  // Close sidebar on desktop resize
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) setSidebarOpen(false);
@@ -29,14 +33,24 @@ export default function DashboardLayout({
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // Listen for session expiry from api.ts (fired when refresh fails during API call)
+  useEffect(() => {
+    const handle = () => router.push("/login?expired=1");
+    window.addEventListener("agentshield:auth-expired", handle);
+    return () => window.removeEventListener("agentshield:auth-expired", handle);
+  }, [router]);
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4 animate-fade-in">
-          <div className="w-12 h-12 bg-[#10B981]/10 rounded-2xl flex items-center justify-center">
-            <div className="w-3 h-3 bg-[#10B981] rounded-full animate-pulse" />
+      <div className="min-h-screen flex items-center justify-center bg-[#050505]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <div className="w-14 h-14 rounded-2xl bg-[#10B981]/10 border border-[#10B981]/20 flex items-center justify-center">
+              <div className="w-4 h-4 bg-[#10B981] rounded-full animate-pulse" />
+            </div>
+            <div className="absolute inset-0 rounded-2xl bg-[#10B981]/5 animate-ping" />
           </div>
-          <p className="text-sm text-white/40 font-medium">Loading AgentShield...</p>
+          <p className="text-sm text-white/40 font-medium tracking-wider">Authenticating...</p>
         </div>
       </div>
     );
