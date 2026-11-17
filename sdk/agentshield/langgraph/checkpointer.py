@@ -128,7 +128,7 @@ class AgentShieldCheckpointer:
         try:
             resp = self._client.get(
                 "/api/memories",
-                params={"memory_type": "checkpoint"},
+                params={"memory_type": "procedural"},
                 headers=self._auth_headers(),
             )
             if resp.status_code != 200:
@@ -199,10 +199,10 @@ class AgentShieldCheckpointer:
                 "/api/memories",
                 json={
                     "content": content,
-                    "memory_type": "checkpoint",
+                    "memory_type": "procedural",
                     "importance_score": 1.0,
-                    "trust_level": 1.0,
-                    "source_provenance": f"langgraph:{thread_id}",
+                    "trust_level": 1,
+                    "source_provenance": "agent_direct",
                 },
                 headers=self._auth_headers(),
             )
@@ -243,10 +243,10 @@ class AgentShieldCheckpointer:
             "/api/memories",
             json={
                 "content": content,
-                "memory_type": "checkpoint",
+                "memory_type": "procedural",
                 "importance_score": 0.8,
-                "trust_level": 1.0,
-                "source_provenance": f"langgraph:{thread_id}:{task_id}",
+                "trust_level": 1,
+                "source_provenance": "agent_direct",
             },
             headers=self._auth_headers(),
         )
@@ -266,7 +266,7 @@ class AgentShieldCheckpointer:
         try:
             resp = self._client.get(
                 "/api/memories",
-                params={"memory_type": "checkpoint"},
+                params={"memory_type": "procedural"},
                 headers=self._auth_headers(),
             )
             if resp.status_code != 200:

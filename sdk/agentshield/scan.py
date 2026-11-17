@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from .auth import AuthManager
@@ -39,7 +41,7 @@ class ScanManager:
             return ScanResult.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -63,7 +65,7 @@ class ScanManager:
             return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,

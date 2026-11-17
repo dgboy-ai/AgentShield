@@ -15,7 +15,7 @@ interface OwnerStats {
   database: { status:string; engine:string };
 }
 interface ActivityEntry { entry_id:string; event_type:string; actor:string; action:string; details: Record<string,unknown>; recorded_at:string; }
-interface SessionRow { org_id:string; org_name:string; owner_email:string; session_label:string; total_entries:number; is_valid:boolean; broken_at:number|null; head_hash:string; verification_time_ms:number; last_active:string|null; verified_at:string; }
+interface SessionRow { org_id:string; org_name:string; owner_email:string; session_label:string; total_entries:number; is_valid?:boolean|null; broken_at?:number|null; head_hash:string; verification_time_ms?:number; total_memories?:number; total_audit?:number; last_active:string|null; verified_at?:string; }
 interface ChainState { hash_chain:{is_valid:boolean; total_entries:number; chains:any[]; method:string}; audit_chain:{is_valid:boolean; total_entries:number} }
 
 export default function OwnerDashboardPage(){
@@ -53,16 +53,16 @@ export default function OwnerDashboardPage(){
   useEffect(()=>{
     if(!token) return;
     fetchData();
-    // SSE with token via query param (EventSource can't set header)
-    const url=`${API_BASE}/api/owner/stream?token=${encodeURIComponent(token)}`;
-    const es=new EventSource(url);
+    // SSE via httpOnly owner_token cookie (EventSource cannot send an Authorization header)
+    const url=`${API_BASE}/api/owner/stream`;
+    const es=new EventSource(url, { withCredentials: true });
     esRef.current=es;
     es.onmessage=(e)=>{
       try{
         const d=JSON.parse(e.data);
         if(d.ts){ setLiveTick(d.ts); setLiveEntries(d.total_entries ?? 0); }
         // also bump stats live without full fetch
-        if(d.total_sessions!=null && stats){
+        if(d.total_sessions!=null){
           setStats(s=> s ? {...s, organizations:{total:d.total_sessions}} : s);
         }
       }catch{}
@@ -85,9 +85,9 @@ export default function OwnerDashboardPage(){
     return <div className="panel" style={{padding:24}}><div className="badge badge-red">{error}</div><div style={{marginTop:12}}><button onClick={fetchData} className="btn btn-outline">Retry</button></div></div>;
   }
 
-  const chainValid = chain?.hash_chain.is_valid ?? true;
-  const chainEntries = chain?.hash_chain.total_entries ?? 0;
-  const auditValid = chain?.audit_chain.is_valid ?? true;
+  const chainValid = chain?.hash_chain?.is_valid ?? false;
+  const chainEntries = chain?.hash_chain?.total_entries ?? 0;
+  const auditValid = chain?.audit_chain?.is_valid ?? false;
 
   const kpis = [
     { label:"Users", value: stats?.users.total ?? 0, sub:`${stats?.users.active ?? 0} active • ${stats?.users.recent_today ?? 0} today`, accent:"#0ea5e9" },
@@ -150,7 +150,7 @@ export default function OwnerDashboardPage(){
           )}
           <div style={{marginTop:14, display:'flex', alignItems:'center', gap:10, fontFamily:'var(--font-mono)', fontSize:11, fontWeight:700, color:'#57534e', flexWrap:'wrap'}}>
             <span>DB:</span><span className={`badge ${stats?.database.status==='connected'?'badge-green':'badge-red'}`}>{stats?.database.status}</span>
-            <span>•</span><span>{new Date(stats?.timestamp ?? Date.now()).toLocaleString()}</span>
+            <span>•</span><span>{stats?.timestamp ? new Date(stats.timestamp).toLocaleString() : "—"}</span>
             <span>•</span><span style={{color:'#000'}}>Scans {stats?.patterns.total_scans ?? 0}</span>
           </div>
         </div>
@@ -194,11 +194,11 @@ export default function OwnerDashboardPage(){
             <tbody>
               {sessions.length===0 ? <tr><td colSpan={6} style={{padding:20, textAlign:'center', fontFamily:'var(--font-mono)', fontSize:12, color:'#78716c'}}>No sessions yet</td></tr> :
                sessions.map(s=>(
-                <tr key={s.org_id} style={{borderBottom:'2px solid #e7e5e4', background: s.is_valid ? '#fff' : '#fef2f2'}}>
+                <tr key={s.org_id} style={{borderBottom:'2px solid #e7e5e4', background: s.is_valid === false ? '#fef2f2' : '#fff'}}>
                   <td style={{padding:'10px 12px', fontWeight:800, fontFamily:'var(--font-mono)', fontSize:11}}>{s.session_label}</td>
                   <td style={{padding:'10px 12px'}}>{s.owner_email}</td>
                   <td style={{padding:'10px 12px', fontWeight:900}}>{s.total_entries}</td>
-                  <td style={{padding:'10px 12px'}}><span className={`badge ${s.is_valid?'badge-green':'badge-red'}`}>{s.is_valid?'VERIFIED':'BROKEN'}</span></td>
+                  <td style={{padding:'10px 12px'}}><span className={`badge ${s.is_valid === true ? 'badge-green' : s.is_valid === false ? 'badge-red' : 'badge-yellow'}`}>{s.is_valid === true ? 'VERIFIED' : s.is_valid === false ? 'BROKEN' : 'UNVERIFIED'}</span></td>
                   <td style={{padding:'10px 12px', fontFamily:'var(--font-mono)', fontSize:10, color:'#57534e'}}>{s.head_hash}</td>
                   <td style={{padding:'10px 12px', fontFamily:'var(--font-mono)', fontSize:10}}>{s.last_active ? new Date(s.last_active).toLocaleString() : '—'}</td>
                 </tr>

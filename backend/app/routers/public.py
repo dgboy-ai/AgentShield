@@ -8,10 +8,11 @@ These are intentionally UNAUTHENTICATED read-only (and safe scan) endpoints so t
 
 Write operations still require auth — but scan/verify are safe to expose.
 
-Demo org resolution order:
-  1. DEMO_ORG_ID env var if set and exists
-  2. First organization in DB
-  3. Auto-create a Demo Organization with seeded data (constraints + audit)
+Demo org resolution:
+  - Only `DEMO_ORG_ID` from the environment is used. There is deliberately no
+    fallback to "the first organization in the DB": these endpoints are
+    unauthenticated, and such a fallback would leak the earliest tenant's
+    memories and audit records.
 """
 
 import os
@@ -41,16 +42,18 @@ router = APIRouter(prefix="/api/public", tags=["public-demo"])
 
 
 def _resolve_demo_org_id(db: Session) -> Optional[str]:
-    """Resolve demo org id for public reads."""
+    """Resolve demo org id for public reads.
+
+    Security: only an explicitly configured DEMO_ORG_ID is ever exposed. Never
+    fall back to an arbitrary tenant, otherwise unauthenticated callers can read
+    another organization's memories/audit trail.
+    """
     demo_org_id = os.getenv("DEMO_ORG_ID", "").strip()
-    if demo_org_id:
-        org = db.query(Organization).filter(Organization.org_id == demo_org_id).first()
-        if org:
-            return str(org.org_id)
-    # fallback: first org in DB
-    first = db.query(Organization).order_by(Organization.created_at.asc()).first()
-    if first:
-        return str(first.org_id)
+    if not demo_org_id:
+        return None
+    org = db.query(Organization).filter(Organization.org_id == demo_org_id).first()
+    if org:
+        return str(org.org_id)
     return None
 
 
@@ -230,27 +233,31 @@ def public_audit_timeline(db: Session = Depends(get_db)):
 def public_audit_verify(db: Session = Depends(get_db)):
     demo_org_id = _resolve_demo_org_id(db)
     if not demo_org_id:
-        return {"valid": True, "total_entries": 0, "demo_org_id": None}
+        return {"valid": False, "total_entries": 0, "demo_org_id": None, "note": "No demo org configured"}
     if audit_trail is not None:
         try:
-            return audit_trail.verify_chain(demo_org_id)
-        except Exception:
-            pass
-    return {"valid": True, "total_entries": 0, "demo_org_id": demo_org_id, "note": "In-memory chain empty"}
+            result = audit_trail.verify_chain(demo_org_id)
+            result.setdefault("demo_org_id", demo_org_id)
+            return result
+        except Exception as e:
+            return {"valid": False, "total_entries": 0, "demo_org_id": demo_org_id, "error": str(e)}
+    # Fail closed: absence of a verifiable chain must never look healthy.
+    return {"valid": False, "total_entries": 0, "demo_org_id": demo_org_id, "note": "Audit engine unavailable"}
 
 
 @router.get("/chain/verify")
 def public_chain_verify(db: Session = Depends(get_db)):
     demo_org_id = _resolve_demo_org_id(db)
     if not demo_org_id:
-        return {"is_valid": True, "total_entries": 0, "demo_org_id": None}
+        return {"is_valid": False, "total_entries": 0, "demo_org_id": None, "note": "No demo org configured"}
     if hash_chain is not None:
         try:
             result = hash_chain.verify(demo_org_id)
             return result.to_dict() if hasattr(result, "to_dict") else result
-        except Exception:
-            pass
-    return {"is_valid": True, "total_entries": 0, "demo_org_id": demo_org_id}
+        except Exception as e:
+            return {"is_valid": False, "total_entries": 0, "demo_org_id": demo_org_id, "error": str(e)}
+    # Fail closed: absence of a verifiable chain must never look healthy.
+    return {"is_valid": False, "total_entries": 0, "demo_org_id": demo_org_id, "note": "Hash chain engine unavailable"}
 
 
 @router.post("/scan")
@@ -264,25 +271,8 @@ def public_scan(body: dict, db: Session = Depends(get_db)):
     if not text:
         return {"error": "Provide {\"text\": \"...\"}", "blocked": False, "match_count": 0}
     result = _pattern_engine.scan(text)
-    # Record audit if demo org exists (best-effort)
-    demo_org_id = _resolve_demo_org_id(db)
-    if demo_org_id and not result.is_safe and audit_trail is not None:
-        try:
-            audit_trail.record(
-                org_id=demo_org_id,
-                event_type=EventType.PATTERN_DETECTED,
-                actor="public_scan",
-                target=None,
-                action="scan",
-                details={
-                    "match_count": len(result.matches),
-                    "risk_score": result.risk_score,
-                    "max_severity": result.max_severity.value,
-                    "blocked": result.blocked,
-                },
-            )
-        except Exception:
-            pass
+    # Security: unauthenticated scans must not write to the shared audit chain,
+    # otherwise anyone can spam/grow the demo org's tamper-evident log.
     return {
         "text_length": result.text_length,
         "match_count": len(result.matches),

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from .auth import AuthManager
@@ -46,7 +48,7 @@ class AuditManager:
             return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -70,7 +72,7 @@ class AuditManager:
             return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -94,7 +96,7 @@ class AuditManager:
             return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -114,9 +116,9 @@ class AuditManager:
         self._require_auth()
         params = {}
         if start_date:
-            params["start_date"] = start_date
+            params["start_time"] = start_date
         if end_date:
-            params["end_date"] = end_date
+            params["end_time"] = end_date
         try:
             resp = self._client.get(
                 "/api/audit/compliance/report",
@@ -133,7 +135,7 @@ class AuditManager:
             return ComplianceReport.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,

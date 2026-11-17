@@ -3,7 +3,9 @@
 Password-protected endpoints for the product owner to monitor
 AgentShield usage, errors, health, and activity.
 
-Password is set via OWNER_DASHBOARD_PASSWORD env var (default: DivyanshAI@11).
+Password is set via the OWNER_DASHBOARD_PASSWORD env var. There is no default
+password: in production startup fails if it is unset, and in development a
+random ephemeral password is generated (logged locally only).
 Stored as bcrypt hash — never plaintext in memory compare uses constant-time.
 Frontend never sees the password; it exchanges password for a short-lived JWT
 via POST /api/owner/verify.
@@ -43,7 +45,7 @@ _raw_owner_pw = os.getenv("OWNER_DASHBOARD_PASSWORD", "")
 _is_prod_owner = os.getenv("ENVIRONMENT", "development").lower() in ("production", "prod")
 if not _raw_owner_pw:
     if _is_prod_owner:
-        raise RuntimeError("CRITICAL: OWNER_DASHBOARD_PASSWORD must be set in production (no default DivyanshAI@11)")
+        raise RuntimeError("CRITICAL: OWNER_DASHBOARD_PASSWORD must be set in production")
     # Dev: generate random and warn (not hardcoded)
     import secrets
     _raw_owner_pw = secrets.token_urlsafe(16)
@@ -126,7 +128,20 @@ def verify_owner(body: OwnerVerifyRequest, request: Request):
         # generic message, no hint
         raise HTTPException(status_code=403, detail="Invalid credentials")
     token = _create_owner_token()
-    return {"token": token, "expires_in": OWNER_JWT_EXPIRE_MINUTES * 60}
+    # Also set an httpOnly cookie so EventSource (which cannot send an
+    # Authorization header) can authenticate the SSE stream.
+    from fastapi.responses import JSONResponse
+    response = JSONResponse({"token": token, "expires_in": OWNER_JWT_EXPIRE_MINUTES * 60})
+    response.set_cookie(
+        "owner_token",
+        token,
+        max_age=OWNER_JWT_EXPIRE_MINUTES * 60,
+        httponly=True,
+        samesite="strict",
+        secure=_is_prod_owner,
+        path="/api/owner",
+    )
+    return response
 
 
 @router.get("/stats")
@@ -531,9 +546,9 @@ def get_owner_chain(
         # audit trail engine verify (in-memory)
         # use first org id if exists
         org_id = chains[0]["org_id"] if chains else "system"
-        av = _at.verify(org_id) if hasattr(_at, "verify") else None
+        av = _at.verify_chain(org_id) if hasattr(_at, "verify_chain") else None
         results["audit_chain"] = {
-            "is_valid": getattr(av, "is_valid", True) if av else True,
+            "is_valid": bool(av.get("valid")) if isinstance(av, dict) else False,
             "total_entries": audit_count,
         }
     except Exception as e:

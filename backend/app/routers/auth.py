@@ -196,6 +196,7 @@ def register(request: Request, response: Response, user_data: UserCreate, db: Se
         password_hash=get_password_hash(user_data.password),
         full_name=user_data.full_name,
         org_id=org.org_id,
+        role="admin",
     )
     db.add(user)
     db.commit()

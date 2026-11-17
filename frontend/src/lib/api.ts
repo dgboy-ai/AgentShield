@@ -1,6 +1,17 @@
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined" ? window.location.origin.replace(":3000", ":8000") : "http://localhost:8000");
+function resolveApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    const origin = window.location.origin;
+    if (origin.includes(":3000")) return origin.replace(":3000", ":8000");
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    return origin;
+  }
+  return "http://localhost:8000";
+}
+
+const API_BASE = resolveApiBase();
 
 interface ApiOptions {
   method?: string;
@@ -18,6 +29,31 @@ export class ApiError extends Error {
     this.status = status;
     this.detail = detail;
   }
+}
+
+function extractErrorMessage(detail: unknown, fallback: string): string {
+  const body = detail && typeof detail === "object" && "detail" in detail
+    ? (detail as Record<string, unknown>).detail
+    : detail;
+  if (typeof body === "string" && body.trim()) return body;
+  if (Array.isArray(body)) {
+    const parts = body
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          const msg = (item as Record<string, unknown>).msg;
+          if (typeof msg === "string") return msg;
+        }
+        return null;
+      })
+      .filter((part): part is string => Boolean(part));
+    if (parts.length > 0) return parts.join("; ");
+  }
+  if (body && typeof body === "object") {
+    const message = (body as Record<string, unknown>).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback || "Request failed";
 }
 
 async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -39,7 +75,13 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     throw err;
   }
 
-  // 5.2: Handle 401 with token refresh & fallback
+  const expireSession = () => {
+    if (typeof window === "undefined") return;
+    try { localStorage.removeItem("agentshield_auth"); } catch {}
+    window.dispatchEvent(new CustomEvent("agentshield:auth-expired"));
+  };
+
+  // Handle 401 with httpOnly refresh (XSS mitigation) and stored refresh fallback
   if (res.status === 401 && !path.includes("/auth/refresh") && !path.includes("/auth/login") && !path.includes("/auth/register")) {
     try {
       let storedRefreshToken: string | undefined;
@@ -63,12 +105,12 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
 
       if (refreshRes.ok) {
         const refreshData = await refreshRes.json();
+        if (refreshData.access_token) headers["Authorization"] = `Bearer ${refreshData.access_token}`;
         if (typeof window !== "undefined" && parsedAuth) {
           parsedAuth.token = refreshData.access_token;
           if (refreshData.refresh_token) parsedAuth.refreshToken = refreshData.refresh_token;
           try { localStorage.setItem("agentshield_auth", JSON.stringify(parsedAuth)); } catch {}
         }
-        if (refreshData.access_token) headers["Authorization"] = `Bearer ${refreshData.access_token}`;
         res = await fetch(`${API_BASE}${path}`, {
           method: opts.method || "GET",
           headers,
@@ -77,24 +119,16 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
         });
         if (res.ok) {
           if (res.status === 204) return undefined as T;
-          const contentType = res.headers.get("content-type") || "";
-          if (contentType.includes("application/json")) {
-            return res.json();
-          }
+          const retryType = res.headers.get("content-type") || "";
+          if (retryType.includes("application/json")) return res.json();
           return (await res.text()) as unknown as T;
         }
       } else {
         // Refresh failed: session expired
-        if (typeof window !== "undefined") {
-          try { localStorage.removeItem("agentshield_auth"); } catch {}
-          window.dispatchEvent(new CustomEvent("agentshield:auth-expired"));
-        }
+        expireSession();
       }
     } catch {
-      if (typeof window !== "undefined") {
-        try { localStorage.removeItem("agentshield_auth"); } catch {}
-        window.dispatchEvent(new CustomEvent("agentshield:auth-expired"));
-      }
+      expireSession();
     }
   }
 
@@ -105,10 +139,7 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     } catch {
       detail = await res.text();
     }
-    const msg = typeof detail === "object" && detail !== null && "detail" in detail
-      ? String((detail as Record<string, unknown>).detail)
-      : res.statusText;
-    throw new ApiError(msg, res.status, detail);
+    throw new ApiError(extractErrorMessage(detail, res.statusText), res.status, detail);
   }
 
   if (res.status === 204) return undefined as T;

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from .auth import AuthManager
@@ -21,8 +23,8 @@ class MemoryManager:
         content: str,
         memory_type: str = "episodic",
         importance_score: float = 0.5,
-        trust_level: float = 1.0,
-        source_provenance: str = "user_input",
+        trust_level: int = 2,
+        source_provenance: str = "agent_direct",
     ) -> Memory:
         """Store a memory. Blocked if pattern detection finds HIGH/CRITICAL matches.
 
@@ -53,7 +55,7 @@ class MemoryManager:
             return Memory.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -84,7 +86,7 @@ class MemoryManager:
             return [Memory.from_dict(m) for m in data]
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -108,7 +110,7 @@ class MemoryManager:
             return Memory.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -132,7 +134,7 @@ class MemoryManager:
             return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,

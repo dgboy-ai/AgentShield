@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.models.database import get_db
@@ -210,6 +210,8 @@ def create_constraint(
 def list_constraints(
     constraint_type: str = None,
     is_active: bool = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dep),
 ):
@@ -221,7 +223,12 @@ def list_constraints(
         q = q.filter(ConstraintDB.constraint_type == constraint_type)
     if is_active is not None:
         q = q.filter(ConstraintDB.is_active == is_active)
-    rows = q.order_by(ConstraintDB.created_at.desc()).all()
+    rows = (
+        q.order_by(ConstraintDB.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     # Build map for hash verification
     return [
         ConstraintResponse(

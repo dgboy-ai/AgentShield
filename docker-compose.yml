@@ -1,12 +1,16 @@
+# DEV ONLY. Do not deploy as-is: CockroachDB runs insecure and secrets are
+# injected from the environment. Set JWT_SECRET_KEY / DATABASE_URL /
+# OWNER_DASHBOARD_PASSWORD in a .env file or CI secret store.
 services:
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=cockroachdb://root@cockroachdb:26257/defaultdb
-      - ENVIRONMENT=development
-      - JWT_SECRET_KEY=dev-secret-change-in-production
+      - DATABASE_URL=${DATABASE_URL:-cockroachdb://root@cockroachdb:26257/defaultdb}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-change-in-production}
+      - OWNER_DASHBOARD_PASSWORD=${OWNER_DASHBOARD_PASSWORD:-}
     volumes:
       - backend-data:/app/data
     healthcheck:

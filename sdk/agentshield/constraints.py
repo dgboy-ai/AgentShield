@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from .auth import AuthManager
@@ -47,7 +49,7 @@ class ConstraintManager:
             return Constraint.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -63,8 +65,8 @@ class ConstraintManager:
         params = {}
         if constraint_type:
             params["constraint_type"] = constraint_type
-        if not active_only:
-            params["is_active"] = "false"
+        if active_only:
+            params["is_active"] = "true"
         try:
             resp = self._client.get(
                 "/api/constraints",
@@ -81,7 +83,7 @@ class ConstraintManager:
             return [Constraint.from_dict(c) for c in data]
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -105,7 +107,7 @@ class ConstraintManager:
             return Constraint.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -143,7 +145,7 @@ class ConstraintManager:
             return Constraint.from_dict(data)
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -179,7 +181,7 @@ class ConstraintManager:
             return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -203,7 +205,7 @@ class ConstraintManager:
             return data
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, TypeError) as e:
+        except (json.JSONDecodeError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,

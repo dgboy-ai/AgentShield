@@ -4,9 +4,8 @@ export const dynamic = 'force-dynamic';
 
 import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Sidebar } from "@/components/sidebar";
-import { CursorGlow } from "@/components/cursor-glow";
 
 export default function DashboardLayout({
   children,
@@ -17,40 +16,21 @@ export default function DashboardLayout({
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Redirect to login when not authenticated
   useEffect(() => {
-    if (!loading && !token) {
-      router.push("/login");
-    }
+    if (!loading && !token) router.push("/login");
   }, [loading, token, router]);
 
-  // Close sidebar on desktop resize
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 768) setSidebarOpen(false);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  // Listen for session expiry from api.ts (fired when refresh fails during API call)
-  useEffect(() => {
-    const handle = () => router.push("/login?expired=1");
-    window.addEventListener("agentshield:auth-expired", handle);
-    return () => window.removeEventListener("agentshield:auth-expired", handle);
-  }, [router]);
+  const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#050505]">
+      <div className="dashboard-shell flex min-h-screen items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <div className="relative">
-            <div className="w-14 h-14 rounded-2xl bg-[#10B981]/10 border border-[#10B981]/20 flex items-center justify-center">
-              <div className="w-4 h-4 bg-[#10B981] rounded-full animate-pulse" />
-            </div>
-            <div className="absolute inset-0 rounded-2xl bg-[#10B981]/5 animate-ping" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#ECFDF5] ring-1 ring-[#A7F3D0]">
+            <div className="h-3 w-3 animate-pulse rounded-full bg-[#059669]" />
           </div>
-          <p className="text-sm text-white/40 font-medium tracking-wider">Authenticating...</p>
+          <p className="text-sm font-medium text-[#475569]">Loading AgentShield...</p>
         </div>
       </div>
     );
@@ -59,18 +39,36 @@ export default function DashboardLayout({
   if (!token) return null;
 
   return (
-    <div className="min-h-screen bg-[#050505]" suppressHydrationWarning>
-      <CursorGlow />
+    <div className="dashboard-shell min-h-screen bg-[#F5F7FA]" suppressHydrationWarning>
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-[#0F172A]/30 backdrop-blur-sm lg:hidden"
+          onClick={closeSidebar}
+          aria-hidden="true"
+        />
+      )}
 
-      {/* Mobile top bar */}
-      <div className="md:hidden fixed top-0 inset-x-0 z-40 h-16 bg-[#050505]/90 border-b border-white/5 backdrop-blur-xl px-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div
+        className={`
+          fixed bottom-0 left-0 top-0 z-40
+          transition-transform duration-300 ease-out
+          lg:translate-x-0
+          ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
+        `}
+      >
+        <Sidebar onNavigate={closeSidebar} />
+      </div>
+
+      <main className="min-h-screen lg:ml-[260px]">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-[#E2E8F0] bg-white/95 px-4 backdrop-blur lg:hidden">
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg bg-white/[0.04] border border-white/10 text-white/70 hover:text-white"
-            aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+            type="button"
+            onClick={toggleSidebar}
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E2E8F0] bg-white text-[#475569] transition-colors hover:bg-[#F8FAFC] hover:text-[#172033]"
+            aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+            aria-expanded={sidebarOpen}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
               {sidebarOpen ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               ) : (
@@ -78,31 +76,18 @@ export default function DashboardLayout({
               )}
             </svg>
           </button>
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-[#10B981] flex items-center justify-center">
-              <span className="font-bold text-black text-[9px]" style={{ fontFamily: "var(--font-space-grotesk)" }}>AS</span>
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#059669]">
+              <span className="font-heading text-[10px] font-bold text-white">AS</span>
             </div>
-            <span className="text-xs font-bold tracking-widest uppercase text-white/90" style={{ fontFamily: "var(--font-space-grotesk)" }}>AgentShield</span>
+            <span className="font-heading text-[15px] font-bold text-[#172033]">AgentShield</span>
           </div>
-        </div>
-      </div>
+        </header>
 
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="md:hidden fixed inset-0 z-40 bg-black/70 backdrop-blur-sm"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* Sidebar */}
-      <div className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0 fixed inset-y-0 left-0 z-50 transition-transform duration-300 h-full`}>
-        <Sidebar onClose={() => setSidebarOpen(false)} />
-      </div>
-
-      <main className="md:ml-[240px] p-4 pt-20 md:p-8 min-h-screen relative z-10 overflow-x-hidden" suppressHydrationWarning>
-        <div className="max-w-6xl mx-auto" suppressHydrationWarning>
-          {children}
+        <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-7 lg:px-8 lg:py-8 xl:px-10">
+          <div className="animate-fade-in" suppressHydrationWarning>
+            {children}
+          </div>
         </div>
       </main>
     </div>

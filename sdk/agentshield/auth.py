@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from .exceptions import AuthenticationError, AgentShieldError
@@ -58,7 +60,7 @@ class AuthManager:
             return token
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -86,7 +88,7 @@ class AuthManager:
             return token
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,
@@ -106,7 +108,7 @@ class AuthManager:
             )
         except httpx.HTTPStatusError as e:
             raise self._translate_error(e)
-        except (httpx.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise AgentShieldError(
                 f"Malformed server response: {e}",
                 status_code=None,

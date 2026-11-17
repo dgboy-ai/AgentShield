@@ -54,13 +54,16 @@ if _has_json_logger:
 app.add_middleware(BodyLimitMiddleware)
 app.add_middleware(RateLimitMiddleware, max_requests=120, window_seconds=60)
 app.add_middleware(RequestIDMiddleware)
-# CORS: allow credentials for httpOnly cookies (refresh flow) while keeping WebMCP wildcard for public routes
-# For credentialed requests, browser requires explicit origin, not "*". We allow localhost and vercel + regex for https.
+# CORS: explicit allowlist by default. `ALLOW_ALL_ORIGINS=true` is available for
+# trusted local demos (e.g. ChatGPT WebMCP) but is unsafe in production because
+# credentialed requests must never be accepted from arbitrary origins.
+_cors_env = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+_default_origins = ["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:3000"]
+_allow_all_origins = os.getenv("ALLOW_ALL_ORIGINS", "false").lower() == "true"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:3000"],
-    allow_origin_regex=r"https://.*",
-    allow_credentials=True,
+    allow_origins=["*"] if _allow_all_origins else list(dict.fromkeys(_default_origins + _cors_env)),
+    allow_credentials=not _allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

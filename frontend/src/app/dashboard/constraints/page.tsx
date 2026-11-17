@@ -1,344 +1,767 @@
 "use client";
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
-import { useEffect, useState, useCallback } from "react";
-import { useAuth } from "@/lib/auth-context";
-import { api, ApiError } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { api, ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import {
+  Badge,
+  EmptyState,
+  ErrorState,
+  InfoNote,
+  PageHeader,
+  Skeleton,
+  StatCard,
+  type Tone,
+} from "@/components/dashboard/kit";
+import {
+  IconAlert,
+  IconCheck,
+  IconCheckCircle,
+  IconEdit,
+  IconKey,
+  IconLink,
+  IconLock,
+  IconPlus,
+  IconRefresh,
+  IconSearch,
+  IconShield,
+  IconShieldCheck,
+  IconTrash,
+  IconX,
+} from "@/components/dashboard/icons";
 
 interface Constraint {
   constraint_id: string;
+  org_id: string;
   text: string;
   constraint_type: string;
   is_active: boolean;
+  previous_hash: string | null;
   entry_hash: string;
+  kms_signature: string | null;
   created_at: string;
+  updated_at: string;
 }
 
-const TYPE_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
-  safety: { bg: "rgba(244,63,94,0.1)", text: "#FB7185", border: "rgba(244,63,94,0.2)", label: "Safety" },
-  policy: { bg: "rgba(245,158,11,0.1)", text: "#FBBF24", border: "rgba(245,158,11,0.2)", label: "Policy" },
-  instruction: { bg: "rgba(56,189,248,0.1)", text: "#38BDF8", border: "rgba(56,189,248,0.2)", label: "Instruction" },
+interface IntegrityScore {
+  org_id: string;
+  integrity_score: number;
+  token_overhead: number;
+  token_overhead_pct: number;
+  estimated_tokens: number;
+}
+
+interface IntegrityVerify {
+  constraint_integrity: {
+    report_id: string;
+    total_constraints: number;
+    active_constraints: number;
+    compromised_constraints: number;
+    hash_mismatches: string[];
+    compaction_events_count: number;
+    overall_score: number;
+    generated_at: string;
+  };
+  hash_chain: {
+    is_valid?: boolean;
+    valid?: boolean;
+    total_entries?: number;
+    valid_entries?: number;
+  };
+}
+
+const PAGE_SIZE = 50;
+const MAX_LENGTH = 10_000;
+
+const TYPE_META: Record<
+  string,
+  { label: string; tone: Tone; icon: typeof IconShield }
+> = {
+  safety: { label: "Safety", tone: "red", icon: IconAlert },
+  policy: { label: "Policy", tone: "amber", icon: IconLock },
+  instruction: { label: "Instruction", tone: "blue", icon: IconShieldCheck },
 };
+
+function typeMeta(type: string) {
+  return TYPE_META[type] ?? { label: type || "General", tone: "neutral" as Tone, icon: IconShield };
+}
+
+function relativeTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  const diff = Date.now() - date.getTime();
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  });
+}
+
+function fullDate(iso: string) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+}
 
 export default function ConstraintsPage() {
   const { token } = useAuth();
   const [constraints, setConstraints] = useState<Constraint[]>([]);
+  const [integrityScore, setIntegrityScore] = useState<IntegrityScore | null>(null);
+  const [integrityVerify, setIntegrityVerify] = useState<IntegrityVerify | null>(null);
+  const [fetching, setFetching] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [text, setText] = useState("");
   const [type, setType] = useState("safety");
-  const [loading, setLoading] = useState(false);
-  const [fetching, setFetching] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [integrity, setIntegrity] = useState<Record<string, unknown> | null>(null);
+  const [pinning, setPinning] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [justPinned, setJustPinned] = useState(false);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [editingType, setEditingType] = useState("safety");
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const PAGE = 50;
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const load = useCallback(async (reset = true) => {
+  useEffect(() => {
     if (!token) return;
-    setFetching(true);
-    setError(null);
-    try {
-      const off = reset ? 0 : offset;
-      const [data, score] = await Promise.all([
-        api.listConstraints(token, { limit: PAGE, offset: off }),
-        reset ? api.integrityScore(token).catch(() => null) : Promise.resolve(null),
-      ]);
-      const arr = (Array.isArray(data) ? data : []) as unknown as Constraint[];
-      if (reset) {
-        setConstraints(arr);
-        setOffset(arr.length);
-        setHasMore(arr.length >= PAGE);
-        if (score) setIntegrity(score as Record<string, unknown>);
-      } else {
-        setConstraints((prev) => [...prev, ...arr]);
-        setOffset((o) => o + arr.length);
-        setHasMore(arr.length >= PAGE);
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const [data, score, verify] = await Promise.all([
+          api.listConstraints(token, { limit: PAGE_SIZE, offset: 0 }),
+          api.integrityScore(token).catch(() => null),
+          api.verifyConstraints(token).catch(() => null),
+        ]);
+        if (cancelled) return;
+        const list = data as unknown as Constraint[];
+        setConstraints(list);
+        setHasMore(list.length >= PAGE_SIZE);
+        setError(null);
+        setIntegrityScore(score ? (score as unknown as IntegrityScore) : null);
+        setIntegrityVerify(verify ? (verify as unknown as IntegrityVerify) : null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : "Failed to load constraints");
+      } finally {
+        if (!cancelled) setFetching(false);
       }
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to load constraints");
-    } finally {
-      setFetching(false);
-    }
-  }, [token, offset]);
+    };
 
-  useEffect(() => { load(true); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, reloadKey]);
 
-  async function handlePin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!token || !text.trim()) return;
-    setLoading(true);
+  function reload() {
+    setFetching(true);
+    setLoadingMore(false);
+    setReloadKey((key) => key + 1);
+  }
+
+  async function loadMore() {
+    if (!token || loadingMore || fetching) return;
+    setLoadingMore(true);
     try {
-      await api.pinConstraint(token, text.trim(), type);
-      setText("");
-      toast.success("Constraint pinned with hash-chain integrity verification");
-      load(true);
+      const data = await api.listConstraints(token, {
+        limit: PAGE_SIZE,
+        offset: constraints.length,
+      });
+      const list = data as unknown as Constraint[];
+      setConstraints((prev) => {
+        const seen = new Set(prev.map((item) => item.constraint_id));
+        return [...prev, ...list.filter((item) => !seen.has(item.constraint_id))];
+      });
+      setHasMore(list.length >= PAGE_SIZE);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to pin constraint");
+      toast.error(err instanceof ApiError ? err.message : "Failed to load more constraints");
     } finally {
-      setLoading(false);
+      setLoadingMore(false);
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!token) return;
+  async function handlePin(event: React.FormEvent) {
+    event.preventDefault();
+    if (!token || !text.trim() || pinning) return;
+    setPinning(true);
+    setPinError(null);
+    setJustPinned(false);
     try {
-      await api.deleteConstraint(token, id);
-      toast.success("Constraint deactivated");
-      load(true);
+      await api.pinConstraint(token, text.trim(), type);
+      setText("");
+      setJustPinned(true);
+      toast.success("Constraint pinned and signed");
+      reload();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to deactivate");
+      setPinError(err instanceof ApiError ? err.message : "Failed to pin constraint");
+    } finally {
+      setPinning(false);
     }
   }
 
   async function handleUpdate(id: string) {
-    if (!token || !editingText.trim()) return;
+    if (!token || !editingText.trim() || savingEdit) return;
+    setSavingEdit(true);
     try {
       await api.updateConstraint(token, id, editingText.trim(), editingType);
-      toast.success("Constraint updated & re-signed");
+      toast.success("Constraint updated and re-signed");
       setEditingId(null);
       setEditingText("");
-      load(true);
+      reload();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Failed to update");
+      toast.error(err instanceof ApiError ? err.message : "Failed to update constraint");
+    } finally {
+      setSavingEdit(false);
     }
   }
 
-  function startEdit(c: Constraint) {
-    setEditingId(c.constraint_id);
-    setEditingText(c.text);
-    setEditingType(c.constraint_type);
+  async function handleDeactivate(id: string) {
+    if (!token || deactivatingId) return;
+    setDeactivatingId(id);
+    try {
+      await api.deleteConstraint(token, id);
+      toast.success("Constraint deactivated");
+      setConfirmingId(null);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to deactivate constraint");
+    } finally {
+      setDeactivatingId(null);
+    }
   }
 
+  function startEdit(constraint: Constraint) {
+    setEditingId(constraint.constraint_id);
+    setEditingText(constraint.text);
+    setEditingType(constraint.constraint_type);
+    setConfirmingId(null);
+  }
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return constraints.filter((item) => {
+      if (typeFilter !== "all" && item.constraint_type !== typeFilter) return false;
+      if (!needle) return true;
+      return (
+        item.text.toLowerCase().includes(needle) ||
+        item.constraint_id.toLowerCase().includes(needle)
+      );
+    });
+  }, [constraints, query, typeFilter]);
+
+  const activeCount = constraints.filter((item) => item.is_active).length;
+  const signedCount = constraints.filter((item) => Boolean(item.kms_signature)).length;
+  const integrityHealthy = integrityScore ? integrityScore.integrity_score >= 0.999 : null;
+  const chainValid = integrityVerify?.hash_chain
+    ? Boolean(integrityVerify.hash_chain.is_valid ?? integrityVerify.hash_chain.valid)
+    : null;
+
   return (
-    <div className="space-y-6 animate-slide-up pb-10">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/5">
-        <div>
-          <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/30 mb-2">Memory Security</p>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-            Constraints
-          </h1>
-          <p className="text-sm text-white/40 mt-1">
-            Pin immutable safety rules that persist across agent memory compactions.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono tracking-widest uppercase px-3 py-1.5 rounded-lg bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20">
-            {constraints.length} Active {constraints.length === 1 ? "Rule" : "Rules"}
-          </span>
-        </div>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Security controls"
+        title="Constraint Security"
+        description="Pin safety-critical rules outside the agent's compressible context. Every rule is hash-chained, signed, and re-injected after compaction."
+        icon={<IconShield size={22} />}
+        actions={
+          <>
+            <Badge tone={activeCount > 0 ? "green" : "neutral"}>
+              <span className="ds-dot" />
+              {activeCount} active
+            </Badge>
+            <button
+              type="button"
+              onClick={reload}
+              disabled={fetching}
+              className="ds-btn ds-btn-secondary"
+            >
+              <IconRefresh size={15} className={fetching ? "animate-spin" : undefined} />
+              Refresh
+            </button>
+          </>
+        }
+      />
+
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <StatCard
+          label="Active rules"
+          value={fetching ? <Skeleton className="h-8 w-14" /> : activeCount}
+          sublabel={`${constraints.length} loaded`}
+          icon={<IconShieldCheck size={17} />}
+          tone="green"
+        />
+        <StatCard
+          label="Integrity"
+          value={
+            fetching ? (
+              <Skeleton className="h-8 w-20" />
+            ) : integrityHealthy === null ? (
+              "—"
+            ) : integrityHealthy ? (
+              "Healthy"
+            ) : (
+              "Degraded"
+            )
+          }
+          sublabel={
+            integrityScore
+              ? `${(integrityScore.integrity_score * 100).toFixed(0)}% verified`
+              : "Awaiting verification"
+          }
+          icon={<IconCheckCircle size={17} />}
+          tone={integrityHealthy === false ? "red" : "green"}
+        />
+        <StatCard
+          label="Hash chain"
+          value={
+            fetching ? (
+              <Skeleton className="h-8 w-20" />
+            ) : chainValid === null ? (
+              "—"
+            ) : chainValid ? (
+              "Valid"
+            ) : (
+              "Broken"
+            )
+          }
+          sublabel="SHA-256 tamper evidence"
+          icon={<IconLink size={17} />}
+          tone={chainValid === false ? "red" : "blue"}
+        />
+        <StatCard
+          label="Signed rules"
+          value={fetching ? <Skeleton className="h-8 w-14" /> : signedCount}
+          sublabel="ECDSA P-256 signatures"
+          icon={<IconKey size={17} />}
+          tone="purple"
+        />
       </div>
 
-      {/* Integrity score card */}
-      {integrity && (
-        <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-[#10B981]/10 border border-[#10B981]/20 flex items-center justify-center shrink-0">
-              <svg className="w-6 h-6 text-[#10B981]" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-              </svg>
-            </div>
-            <div>
-              <div className="text-[10px] font-mono tracking-widest uppercase text-white/40">Integrity Score</div>
-              <div className="text-2xl font-bold font-mono" style={{ color: Number(integrity.integrity_score) >= 1 ? "#10B981" : "#F43F5E" }}>
-                {(Number(integrity.integrity_score) * 100).toFixed(0)}%
+      <div className="grid items-start gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+        <div className="space-y-5">
+          <form onSubmit={handlePin} className="ds-card p-5">
+            <div className="mb-4 flex items-start gap-3">
+              <div
+                className="ds-icon-tile h-10 w-10"
+                style={{ background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0" }}
+              >
+                <IconPlus size={18} />
+              </div>
+              <div>
+                <h2 className="ds-card-title">Pin a new rule</h2>
+                <p className="ds-meta mt-0.5">Protected before every memory operation.</p>
               </div>
             </div>
-          </div>
-          <div className="sm:text-right">
-            <div className="text-[10px] font-mono tracking-widest uppercase text-white/40">Token Overhead</div>
-            <div className="text-sm font-mono font-bold text-white/90">
-              {(Number(integrity.token_overhead) * 100).toFixed(3)}%
-            </div>
-            <div className="text-[10px] font-mono text-[#10B981]/70">Target &lt; 0.5%</div>
-          </div>
-        </div>
-      )}
 
-      {/* Pin form */}
-      <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-8 h-8 rounded-lg bg-[#10B981]/10 border border-[#10B981]/20 flex items-center justify-center">
-            <svg className="w-4 h-4 text-[#10B981]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-          </div>
-          <h2 className="text-sm font-semibold text-white tracking-wide">Pin New Constraint</h2>
-        </div>
-        <form onSubmit={handlePin} className="space-y-4">
-          <div>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              rows={2}
-              placeholder="e.g. Never execute destructive terminal commands without explicit user approval."
-              className="w-full px-4 py-3 rounded-xl text-sm font-medium bg-white/[0.03] border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-[#10B981] transition-colors resize-none"
-            />
-          </div>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-[10px] font-mono tracking-widest uppercase text-white/40 shrink-0">Type:</label>
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-                className="px-3 py-2 rounded-xl text-xs font-mono font-medium bg-[#121212] border border-white/10 text-white focus:outline-none focus:border-[#10B981]"
-              >
-                <option value="safety">Safety</option>
-                <option value="policy">Policy</option>
-                <option value="instruction">Instruction</option>
-              </select>
+            <div className="ds-field">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="constraint-text" className="ds-label">
+                  Constraint
+                </label>
+                <span className="ds-meta">{text.length.toLocaleString()} / 10,000</span>
+              </div>
+              <textarea
+                id="constraint-text"
+                value={text}
+                onChange={(event) => {
+                  setText(event.target.value);
+                  setJustPinned(false);
+                }}
+                placeholder="Never execute shell commands without explicit user confirmation."
+                maxLength={MAX_LENGTH}
+                rows={5}
+                disabled={pinning}
+                className="ds-textarea"
+              />
+              <p className="ds-help">
+                Write a short, unconditional rule. It is stored outside the agent context and
+                checked before high-impact actions.
+              </p>
             </div>
+
+            <div className="ds-field mt-4">
+              <span className="ds-label">Category</span>
+              <div className="grid grid-cols-3 gap-2">
+                {(["safety", "policy", "instruction"] as const).map((option) => {
+                  const meta = typeMeta(option);
+                  const active = type === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setType(option)}
+                      className={`ds-btn ds-btn-sm ${active ? "ds-btn-primary" : "ds-btn-secondary"}`}
+                      aria-pressed={active}
+                    >
+                      {meta.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {pinError ? (
+              <div className="ds-alert mt-4">
+                <IconAlert size={16} className="mt-0.5 shrink-0" />
+                <span>{pinError}</span>
+              </div>
+            ) : null}
+
+            {justPinned ? (
+              <div className="ds-alert ds-alert-success mt-4">
+                <IconCheck size={16} className="mt-0.5 shrink-0" />
+                <span>Rule pinned with a new signature and hash-chain entry.</span>
+              </div>
+            ) : null}
+
             <button
               type="submit"
-              disabled={loading || !text.trim()}
-              className="sm:ml-auto px-5 py-2.5 rounded-xl text-xs font-bold bg-[#10B981] text-black hover:bg-[#34D399] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              disabled={pinning || !text.trim()}
+              className="ds-btn ds-btn-primary mt-4 w-full"
             >
-              {loading ? (
+              {pinning ? (
                 <>
-                  <div className="w-3.5 h-3.5 rounded-full border-2 border-black border-t-transparent animate-spin" />
-                  <span>Pinning...</span>
+                  <IconRefresh size={15} className="animate-spin" />
+                  Pinning…
                 </>
               ) : (
-                "Pin Constraint"
+                <>
+                  <IconLock size={15} />
+                  Pin constraint
+                </>
               )}
             </button>
-          </div>
-        </form>
-      </div>
+          </form>
 
-      {/* Error state */}
-      {error && (
-        <div className="rounded-2xl p-5 border border-rose-500/20 bg-rose-500/10 text-center">
-          <p className="text-xs font-mono text-rose-400 mb-3">{error}</p>
-          <button onClick={() => load(true)} className="px-4 py-1.5 rounded-lg text-xs font-mono font-bold bg-white/5 text-white/70 hover:bg-white/10">
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* Loading state */}
-      {fetching && (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-20 rounded-xl bg-white/[0.03] animate-pulse" />
-          ))}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!fetching && !error && constraints.length === 0 && (
-        <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-12 text-center">
-          <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-center mx-auto mb-4 text-white/30">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
-            </svg>
-          </div>
-          <p className="text-sm font-semibold text-white/80">No constraints pinned yet</p>
-          <p className="text-xs text-white/40 mt-1">Pin your first safety or policy constraint using the form above.</p>
-        </div>
-      )}
-
-      {/* Constraint List */}
-      <div className="space-y-3">
-        {!fetching && constraints.map((c) => {
-          const style = TYPE_STYLES[c.constraint_type] || TYPE_STYLES.safety;
-          const isEditing = editingId === c.constraint_id;
-
-          return (
-            <div
-              key={c.constraint_id}
-              className="rounded-xl border border-white/5 bg-white/[0.02] p-4 transition-all hover:bg-white/[0.04] hover:border-white/10"
-            >
-              {isEditing ? (
-                <div className="space-y-3">
-                  <textarea
-                    value={editingText}
-                    onChange={(e) => setEditingText(e.target.value)}
-                    rows={2}
-                    className="w-full px-3 py-2 rounded-lg text-sm bg-black/40 border border-white/10 text-white focus:outline-none focus:border-[#10B981] resize-none"
-                  />
-                  <div className="flex items-center gap-3">
-                    <select
-                      value={editingType}
-                      onChange={(e) => setEditingType(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[#121212] border border-white/10 text-white"
-                    >
-                      <option value="safety">Safety</option>
-                      <option value="policy">Policy</option>
-                      <option value="instruction">Instruction</option>
-                    </select>
-                    <button
-                      onClick={() => handleUpdate(c.constraint_id)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#10B981] text-black hover:bg-[#34D399]"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-white/50 hover:text-white"
-                    >
-                      Cancel
-                    </button>
+          <div className="ds-card p-5">
+            <h2 className="ds-card-title">How pinning protects rules</h2>
+            <ol className="mt-4 space-y-4">
+              {[
+                {
+                  title: "Stored outside context",
+                  body: "Rules live in the protected pinning engine, not the agent's summarizable context window.",
+                },
+                {
+                  title: "Sealed and signed",
+                  body: "Each change creates a hash-chain entry and an ECDSA signature so modifications are detectable.",
+                },
+                {
+                  title: "Re-injected after compaction",
+                  body: "The engine verifies and restores active rules after memory compression or poisoning attempts.",
+                },
+              ].map((step, index) => (
+                <li key={step.title} className="flex gap-3">
+                  <span
+                    className="ds-mono flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
+                    style={{ background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0" }}
+                  >
+                    {index + 1}
+                  </span>
+                  <div>
+                    <p className="text-[13px] font-semibold" style={{ color: "var(--ds-text)" }}>
+                      {step.title}
+                    </p>
+                    <p className="ds-meta mt-0.5">{step.body}</p>
                   </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+
+        <div className="min-w-0 space-y-5">
+          {error ? (
+            <ErrorState
+              title="Unable to load constraints"
+              message={error}
+              onRetry={reload}
+            />
+          ) : (
+            <div className="ds-card overflow-hidden">
+              <div className="ds-card-head">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="ds-card-title">Protected constraints</h2>
+                    {!fetching ? <Badge tone="neutral">{filtered.length}</Badge> : null}
+                  </div>
+                  <p className="ds-meta mt-1">
+                    {activeCount} active of {constraints.length} loaded
+                  </p>
                 </div>
+                <div className="ds-toolbar">
+                  <div className="relative">
+                    <IconSearch
+                      size={15}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
+                      style={{ color: "var(--ds-text-muted)" }}
+                    />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Search rules"
+                      aria-label="Search constraints"
+                      className="ds-input h-9 w-full pl-9 text-[13px] sm:w-56"
+                    />
+                  </div>
+                  <select
+                    value={typeFilter}
+                    onChange={(event) => setTypeFilter(event.target.value)}
+                    aria-label="Filter by category"
+                    className="ds-select h-9 w-auto text-[13px]"
+                  >
+                    <option value="all">All categories</option>
+                    <option value="safety">Safety</option>
+                    <option value="policy">Policy</option>
+                    <option value="instruction">Instruction</option>
+                  </select>
+                </div>
+              </div>
+
+              {fetching ? (
+                <div className="divide-y" style={{ borderColor: "var(--ds-border)" }}>
+                  {[0, 1, 2].map((index) => (
+                    <div key={index} className="flex gap-4 p-5">
+                      <Skeleton className="h-10 w-10 shrink-0" />
+                      <div className="flex-1 space-y-3">
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-3 w-1/2" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : filtered.length === 0 ? (
+                <EmptyState
+                  icon={<IconShieldCheck size={22} />}
+                  title={constraints.length === 0 ? "No protected rules yet" : "No rules match"}
+                  description={
+                    constraints.length === 0
+                      ? "Pin the first safety rule to protect it from context compaction and memory poisoning."
+                      : "Adjust the search text or category filter to find a constraint."
+                  }
+                  action={
+                    constraints.length === 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById("constraint-text")?.focus()}
+                        className="ds-btn ds-btn-primary"
+                      >
+                        <IconPlus size={15} />
+                        Pin first constraint
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setQuery("");
+                          setTypeFilter("all");
+                        }}
+                        className="ds-btn ds-btn-secondary"
+                      >
+                        Clear filters
+                      </button>
+                    )
+                  }
+                />
               ) : (
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white/90 leading-relaxed font-medium">{c.text}</p>
-                    <div className="flex items-center gap-3 mt-3 flex-wrap">
-                      <span
-                        className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider uppercase"
-                        style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}
-                      >
-                        {style.label}
-                      </span>
-                      {c.entry_hash && (
-                        <span className="text-[10px] font-mono text-white/30 truncate" title={`SHA-256: ${c.entry_hash}`}>
-                          {c.entry_hash.slice(0, 10)}…{c.entry_hash.slice(-6)}
-                        </span>
-                      )}
-                      <span className="text-[10px] font-mono text-white/30">
-                        {new Date(c.created_at).toLocaleDateString()} {new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                  </div>
-                  {c.is_active && (
-                    <div className="flex items-center gap-2 self-end sm:self-start shrink-0">
-                      <button
-                        onClick={() => startEdit(c)}
-                        className="px-2.5 py-1 rounded text-xs font-mono text-white/50 hover:text-white hover:bg-white/5 transition-colors"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(c.constraint_id)}
-                        className="px-2.5 py-1 rounded text-xs font-mono text-rose-400/60 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                      >
-                        Deactivate
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                <ul className="divide-y" style={{ borderColor: "var(--ds-border)" }}>
+                  {filtered.map((constraint) => {
+                    const meta = typeMeta(constraint.constraint_type);
+                    const TypeIcon = meta.icon;
+                    const editing = editingId === constraint.constraint_id;
+                    const confirming = confirmingId === constraint.constraint_id;
+                    return (
+                      <li key={constraint.constraint_id} className="p-4 sm:p-5">
+                        <div className="flex gap-3">
+                          <div
+                            className="ds-icon-tile mt-0.5 h-10 w-10"
+                            style={{
+                              background: constraint.is_active ? "#F8FAFC" : "#F1F5F9",
+                              color: constraint.is_active ? "#047857" : "#64748B",
+                              border: "1px solid var(--ds-border)",
+                            }}
+                          >
+                            <TypeIcon size={18} />
+                          </div>
 
-      {!fetching && hasMore && constraints.length >= 50 && (
-        <div className="flex justify-center pt-2">
-          <button
-            onClick={() => load(false)}
-            className="px-4 py-2 rounded-xl text-xs font-mono font-bold border border-white/10 bg-white/[0.02] text-white/70 hover:bg-white/5 transition-colors"
-          >
-            Load More ({constraints.length} loaded)
-          </button>
+                          <div className="min-w-0 flex-1">
+                            {editing ? (
+                              <div className="space-y-3">
+                                <textarea
+                                  value={editingText}
+                                  onChange={(event) => setEditingText(event.target.value)}
+                                  rows={4}
+                                  className="ds-textarea"
+                                  aria-label="Edit constraint text"
+                                />
+                                <div className="ds-toolbar">
+                                  <select
+                                    value={editingType}
+                                    onChange={(event) => setEditingType(event.target.value)}
+                                    className="ds-select h-9 w-auto text-[13px]"
+                                    aria-label="Constraint category"
+                                  >
+                                    <option value="safety">Safety</option>
+                                    <option value="policy">Policy</option>
+                                    <option value="instruction">Instruction</option>
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdate(constraint.constraint_id)}
+                                    disabled={savingEdit || !editingText.trim()}
+                                    className="ds-btn ds-btn-primary ds-btn-sm"
+                                  >
+                                    <IconCheck size={14} />
+                                    {savingEdit ? "Saving…" : "Save change"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingId(null)}
+                                    disabled={savingEdit}
+                                    className="ds-btn ds-btn-secondary ds-btn-sm"
+                                  >
+                                    <IconX size={14} />
+                                    Cancel
+                                  </button>
+                                </div>
+                                <p className="ds-help">
+                                  Editing re-signs the rule and appends a new audit entry.
+                                </p>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                  <p className="text-sm font-semibold leading-relaxed" style={{ color: "var(--ds-text)" }}>
+                                    {constraint.text}
+                                  </p>
+                                  {constraint.is_active ? (
+                                    <div className="flex shrink-0 items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => startEdit(constraint)}
+                                        className="ds-icon-btn"
+                                        aria-label="Edit constraint"
+                                        title="Edit constraint"
+                                      >
+                                        <IconEdit size={15} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmingId(constraint.constraint_id)}
+                                        className="ds-icon-btn"
+                                        aria-label="Deactivate constraint"
+                                        title="Deactivate constraint"
+                                      >
+                                        <IconTrash size={15} />
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </div>
+
+                                <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                                  <Badge tone={meta.tone}>{meta.label}</Badge>
+                                  <Badge tone={constraint.is_active ? "green" : "neutral"}>
+                                    <span className="ds-dot" />
+                                    {constraint.is_active ? "Active" : "Inactive"}
+                                  </Badge>
+                                  {constraint.kms_signature ? (
+                                    <Badge tone="purple">
+                                      <IconKey size={11} />
+                                      Signed
+                                    </Badge>
+                                  ) : null}
+                                  <span
+                                    className="ds-mono text-[11px]"
+                                    title={constraint.entry_hash}
+                                    style={{ color: "var(--ds-text-muted)" }}
+                                  >
+                                    {constraint.entry_hash ? `${constraint.entry_hash.slice(0, 14)}…` : "hash pending"}
+                                  </span>
+                                  <span className="ds-meta" title={fullDate(constraint.created_at)}>
+                                    Added {relativeTime(constraint.created_at)}
+                                  </span>
+                                  <span className="ds-mono text-[11px]" style={{ color: "var(--ds-text-muted)" }}>
+                                    {constraint.constraint_id.slice(0, 8)}
+                                  </span>
+                                </div>
+
+                                {confirming ? (
+                                  <div className="ds-alert mt-3">
+                                    <IconAlert size={16} className="mt-0.5 shrink-0" />
+                                    <div className="flex-1">
+                                      <p className="font-semibold">Deactivate this rule?</p>
+                                      <p className="mt-0.5 text-[12.5px]">
+                                        It will stop being enforced after context compaction. The
+                                        audit trail keeps a record of this action.
+                                      </p>
+                                      <div className="mt-2.5 flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeactivate(constraint.constraint_id)}
+                                          disabled={deactivatingId === constraint.constraint_id}
+                                          className="ds-btn ds-btn-danger ds-btn-sm"
+                                        >
+                                          {deactivatingId === constraint.constraint_id
+                                            ? "Deactivating…"
+                                            : "Deactivate"}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setConfirmingId(null)}
+                                          className="ds-btn ds-btn-secondary ds-btn-sm"
+                                        >
+                                          Keep active
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {hasMore && !fetching && !error ? (
+                <div className="flex items-center justify-center border-t px-5 py-4" style={{ borderColor: "var(--ds-border)" }}>
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="ds-btn ds-btn-secondary ds-btn-sm"
+                  >
+                    {loadingMore ? "Loading…" : `Load more (${constraints.length} loaded)`}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          <InfoNote>
+            The pinning engine compares stored rules against each memory operation. If a rule was
+            altered or dropped, the integrity check flags it before the agent continues.
+          </InfoNote>
         </div>
-      )}
+      </div>
     </div>
   );
 }

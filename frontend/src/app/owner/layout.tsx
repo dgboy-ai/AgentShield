@@ -30,10 +30,10 @@ export function OwnerAuthProvider({ children }: { children: React.ReactNode }){
 
   const login = async (password:string): Promise<{ok:boolean; error?:string}>=>{
     try{
-      const r=await fetch(`${API_BASE}/api/owner/verify`,{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ password }) });
+      const r=await fetch(`${API_BASE}/api/owner/verify`,{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ password }), credentials:"include" });
       if(!r.ok){
         if(r.status===429) return {ok:false, error:"Rate-limited — try again in 60s"};
-        if(r.status===403) return {ok:false, error:"INVALID PASSWORD — use DivyanshAI@11 (capital D)"};
+        if(r.status===403) return {ok:false, error:"Invalid password"};
         return {ok:false, error:`Server error ${r.status}`};
       }
       const data=await r.json();
