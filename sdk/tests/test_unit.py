@@ -372,6 +372,47 @@ class TestConstraintManager:
         with pytest.raises(AgentShieldError, match="Not authenticated"):
             shield.constraints.pin("text")
 
+    def test_inject_renders_block(self):
+        shield = self._authed_shield()
+        second = _constraint_data()
+        second["constraint_id"] = "con-002"
+        second["text"] = "Never execute arbitrary shell commands"
+        shield._client.get = MagicMock(
+            return_value=_mock_response(200, [_constraint_data(), second])
+        )
+        block = shield.constraints.inject()
+        assert block.startswith("<agentshield-constraints>")
+        assert block.endswith("</agentshield-constraints>")
+        assert "- [safety] Never share credentials" in block
+        assert "- [safety] Never execute arbitrary shell commands" in block
+        assert "must be followed at all times" in block
+        # inject() fetches only active constraints
+        params = shield._client.get.call_args.kwargs["params"]
+        assert params == {"is_active": "true"}
+
+    def test_inject_single_constraint_exact(self):
+        shield = self._authed_shield()
+        shield._client.get = MagicMock(
+            return_value=_mock_response(200, [_constraint_data()])
+        )
+        block = shield.constraints.inject()
+        assert block == (
+            "<agentshield-constraints>\n"
+            "The following pinned constraints must be followed at all times:\n"
+            "- [safety] Never share credentials\n"
+            "</agentshield-constraints>"
+        )
+
+    def test_inject_empty_when_no_constraints(self):
+        shield = self._authed_shield()
+        shield._client.get = MagicMock(return_value=_mock_response(200, []))
+        assert shield.constraints.inject() == ""
+
+    def test_inject_requires_auth(self):
+        shield = AgentShield(base_url="http://fake")
+        with pytest.raises(AgentShieldError, match="Not authenticated"):
+            shield.constraints.inject()
+
 
 # ---------------------------------------------------------------------------
 # ScanManager tests

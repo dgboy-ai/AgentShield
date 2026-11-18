@@ -14,7 +14,9 @@ from app.routers.constraints import hash_chain, audit_trail, signing_engine
 from app.schemas.memory import MemoryCreate, MemoryResponse
 from app.core.hash_chain import EntryType, ChainEntry
 from app.core.audit_trail import EventType
+from app.core.constraint_conflict import find_conflicts
 from app.core.pattern_detection import shared_engine as pattern_engine, Severity
+from app.models.constraint import Constraint as ConstraintDB
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
 
@@ -183,6 +185,51 @@ def store_memory(
     org_id = str(current_user.org_id)
     memory_id = str(uuid.uuid4())
 
+    # Constraint-conflict check BEFORE pattern scan: Path A override attempt,
+    # Path B >=75% keyword restatement of a pinned constraint (ASI06 drift).
+    active_constraints = (
+        db.query(ConstraintDB)
+        .filter(
+            ConstraintDB.org_id == current_user.org_id,
+            ConstraintDB.is_active.is_(True),
+        )
+        .all()
+    )
+    conflict_result = find_conflicts(active_constraints, data.content)
+    if conflict_result.detected:
+        alert = AlertDB(
+            org_id=current_user.org_id,
+            alert_type="memory_constraint_conflict",
+            severity="high",
+            description=(
+                "Blocked memory store: conflicts with "
+                f"{len(conflict_result.conflicts)} pinned constraint(s)"
+            ),
+            patterns_matched=[c.to_dict() for c in conflict_result.conflicts],
+        )
+        db.add(alert)
+        audit_trail.record(
+            org_id=org_id,
+            event_type=EventType.MEMORY_CONSTRAINT_CONFLICT,
+            actor=str(current_user.user_id),
+            target=memory_id,
+            action="block",
+            details={
+                "conflicts": len(conflict_result.conflicts),
+                "paths": sorted({c.path for c in conflict_result.conflicts}),
+                "constraint_ids": conflict_result.constraint_ids,
+            },
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "Memory rejected: conflicts with pinned constraints",
+                "conflict_count": len(conflict_result.conflicts),
+                "conflicts": [c.to_dict() for c in conflict_result.conflicts],
+            },
+        )
+
     # Scan for injection patterns BEFORE touching the hash chain - scan all user-controlled fields (3.3)
     combined_text = f"{data.content} {data.source_provenance} {data.memory_type}"
     scan_result = pattern_engine.scan(combined_text)
@@ -207,6 +254,19 @@ def store_memory(
             patterns_matched=[m.to_dict() for m in scan_result.matches],
         )
         db.add(alert)
+        audit_trail.record(
+            org_id=org_id,
+            event_type=EventType.MEMORY_BLOCKED,
+            actor=str(current_user.user_id),
+            target=memory_id,
+            action="block",
+            details={
+                "reason": "pattern_scan",
+                "risk_score": scan_result.risk_score,
+                "max_severity": scan_result.max_severity.value,
+                "patterns_matched": len(scan_result.matches),
+            },
+        )
         db.commit()
 
         raise HTTPException(

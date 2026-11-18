@@ -32,6 +32,8 @@ class EventType(str, Enum):
     MEMORY_STORED = "memory_stored"
     MEMORY_RETRIEVED = "memory_retrieved"
     MEMORY_TAMPERED = "memory_tampered"
+    MEMORY_CONSTRAINT_CONFLICT = "memory_constraint_conflict"
+    MEMORY_BLOCKED = "memory_blocked"
     COMPACTION_SIMULATED = "compaction_simulated"
     CONSTRAINTS_REINJECTED = "constraints_reinjected"
     PATTERN_DETECTED = "pattern_detected"

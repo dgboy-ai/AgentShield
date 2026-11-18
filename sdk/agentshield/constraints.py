@@ -55,6 +55,29 @@ class ConstraintManager:
                 status_code=None,
             ) from e
 
+    def inject(self) -> str:
+        """Fetch active constraints and render them as a system-prompt block.
+
+        This is the write-path half of constraint pinning: fetch the org's
+        active constraints and prepend the returned block to the agent's
+        system prompt so pins survive context compaction.
+
+        Returns:
+            A ready-to-prepend block, or "" when no constraints are pinned.
+        """
+        constraints = self.list(active_only=True)
+        if not constraints:
+            return ""
+        lines = "\n".join(
+            f"- [{c.constraint_type}] {c.text}" for c in constraints
+        )
+        return (
+            "<agentshield-constraints>\n"
+            "The following pinned constraints must be followed at all times:\n"
+            f"{lines}\n"
+            "</agentshield-constraints>"
+        )
+
     def list(
         self,
         constraint_type: str | None = None,
