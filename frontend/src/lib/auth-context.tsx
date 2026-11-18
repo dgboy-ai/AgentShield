@@ -219,8 +219,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try { await api.logout(); } catch {}
+    try { localStorage.removeItem("agentshield_db_engine"); } catch {}
     clearSession("logout");
   }, [clearSession]);
+
+  // Cross-tab session sync: a login/logout in another tab updates this one
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== "agentshield_auth") return;
+      try {
+        if (!e.newValue) {
+          setState({ ...EMPTY_STATE });
+          return;
+        }
+        const parsed = JSON.parse(e.newValue) as AuthState;
+        setState({ ...parsed, loading: false });
+      } catch {}
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   return (
     <AuthContext.Provider value={{ ...state, login, register, logout, refresh, loadProfile }}>

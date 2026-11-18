@@ -16,9 +16,9 @@ describe('Docs Page', () => {
 
   it('renders the sections', () => {
     render(<Docs />)
-    expect(screen.getByText('Constraint Pinning')).toBeInTheDocument()
-    expect(screen.getByText('Hash Chain Integrity')).toBeInTheDocument()
-    expect(screen.getByText('Poisoning Detection')).toBeInTheDocument()
-    expect(screen.getByText('Time-Travel Queries')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Constraint Pinning' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Hash Chain Integrity' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Poisoning Detection' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Time-Travel Queries' })).toBeInTheDocument()
   })
 })

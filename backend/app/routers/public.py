@@ -264,12 +264,15 @@ def public_chain_verify(db: Session = Depends(get_db)):
 def public_scan(body: dict, db: Session = Depends(get_db)):
     """
     Public OWASP ASI06 scan — no auth required.
-    Body: { "text": "..." }
+    Body: { "text": "..." } (max 20000 chars, 413 if larger)
     Used by WebMCP tool `scanForPoisoning` without a JWT.
     """
+    from fastapi import HTTPException
     text = body.get("text", "") if isinstance(body, dict) else ""
     if not text:
         return {"error": "Provide {\"text\": \"...\"}", "blocked": False, "match_count": 0}
+    if not isinstance(text, str) or len(text) > 20000:
+        raise HTTPException(status_code=413, detail="Scan text too large: max 20000 chars")
     result = _pattern_engine.scan(text)
     # Security: unauthenticated scans must not write to the shared audit chain,
     # otherwise anyone can spam/grow the demo org's tamper-evident log.

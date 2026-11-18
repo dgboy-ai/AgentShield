@@ -2,827 +2,500 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { motion, useScroll, useTransform, useInView } from "framer-motion";
-import { useRef, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { AnimatePresence, motion, useScroll, useTransform, useSpring, useInView } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { CursorGlow } from "@/components/cursor-glow";
+import { SiteNav } from "@/components/site-nav";
+import { HeroSeam } from "@/components/hero-seam";
+import { CodeExplorer } from "@/components/code-explorer";
+import { CTASection } from "@/components/cta-section";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 const HeroShield = dynamic(() => import("@/components/hero-shield"), { ssr: false });
 
-// ─── Deterministic style helpers ───
-// Inline styles must serialize to the exact same string on the server and the
-// client, otherwise React reports a hydration mismatch. Hex colors with an
-// alpha suffix (e.g. `#10B98130`) get normalized by the browser to `rgba(...)`,
-// and floating point coordinates can differ in the last digits between the Node
-// and browser math implementations. These helpers remove both sources of drift.
-function withAlpha(hex: string, alpha: number): string {
-  const h = hex.replace("#", "");
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+// ─── helpers ──────────────────────────────────────────────────────────
+function useMagnetic() {
+  const ref = useRef<HTMLAnchorElement>(null);
+  const x = useRef(0), y = useRef(0);
+  const raf = useRef<number>(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    function onMove(e: MouseEvent) {
+      const r = el!.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      x.current = (e.clientX - cx) * 0.18;
+      y.current = (e.clientY - cy) * 0.24;
+      cancelAnimationFrame(raf.current);
+      raf.current = requestAnimationFrame(() => {
+        el!.style.transform = `translate3d(${x.current}px,${y.current}px,0)`;
+      });
+    }
+    function onLeave() {
+      cancelAnimationFrame(raf.current);
+      el!.style.transform = `translate3d(0,0,0)`;
+    }
+    el.addEventListener("mousemove", onMove);
+    el.addEventListener("mouseleave", onLeave);
+    return () => { el.removeEventListener("mousemove", onMove); el.removeEventListener("mouseleave", onLeave); cancelAnimationFrame(raf.current); };
+  }, []);
+  return ref;
 }
 
-function px(value: number): string {
-  return `${Math.round(value * 100) / 100}px`;
+function Sparkle({ delay = 0, x = 0, y = 0 }: { delay?: number; x?: number; y?: number }) {
+  return (
+    <motion.span
+      className="absolute pointer-events-none"
+      style={{ left: x, top: y }}
+      initial={{ opacity: 0, scale: 0, rotate: 0 }}
+      animate={{ opacity: [0, 1, 0], scale: [0, 1.1, 0], rotate: [0, 90, 180] }}
+      transition={{ duration: 1.1, delay, repeat: Infinity, repeatDelay: 2.4 + Math.random() * 1.6, ease: "easeOut" }}
+      aria-hidden
+    >
+      <svg width={10} height={10} viewBox="0 0 10 10" fill="none"><path d="M5 0L5.9 4.1L10 5L5.9 5.9L5 10L4.1 5.9L0 5L4.1 4.1Z" fill="#34D399" /></svg>
+    </motion.span>
+  );
 }
 
-function polarPosition(radius: number, angle: number): { left: string; top: string } {
-  const rad = (angle * Math.PI) / 180;
-  return {
-    left: px(240 + radius * Math.cos(rad) - 48),
-    top: px(240 + radius * Math.sin(rad) - 48),
-  };
-}
-
-// ─── Reusable section reveal ───
-function Reveal({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
-  const ref = useRef(null);
+function Reveal({ children, delay = 0, y = 18 }: { children: React.ReactNode; delay?: number; y?: number }) {
+  const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "-80px" });
   return (
     <motion.div
       ref={ref}
-      initial={{ opacity: 0, y: 40 }}
-      animate={inView ? { opacity: 1, y: 0 } : {}}
+      initial={{ opacity: 0, y, filter: "blur(6px)" }}
+      animate={inView ? { opacity: 1, y: 0, filter: "blur(0px)" } : {}}
       transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
-      className={className}
     >
       {children}
     </motion.div>
   );
 }
 
-// ─── Section tag ───
-function Tag({ color = "#10B981", children }: { color?: string; children: React.ReactNode }) {
+function TiltCard({ children, className, style, glow }: { children: React.ReactNode; className?: string; style?: React.CSSProperties; glow?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  function onMove(e: React.MouseEvent) {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const rx = ((e.clientY - r.top) / r.height - 0.5) * -6;
+    const ry = ((e.clientX - r.left) / r.width - 0.5) * 8;
+    el.style.transform = `perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) translateY(-4px)`;
+    const g = el.querySelector(".tilt-glow") as HTMLElement;
+    if (g) { g.style.opacity = "1"; g.style.background = `radial-gradient(520px 220px at ${((e.clientX - r.left) / r.width) * 100}% ${((e.clientY - r.top) / r.height) * 100}%, ${glow || "rgba(16,185,129,0.13)"}, transparent 70%)`; }
+  }
+  function onLeave() {
+    const el = ref.current;
+    if (!el) return;
+    el.style.transform = `perspective(900px) rotateX(0) rotateY(0) translateY(0)`;
+    const g = el.querySelector(".tilt-glow") as HTMLElement;
+    if (g) g.style.opacity = "0";
+  }
   return (
-    <div className="inline-flex items-center gap-2 mb-6">
-      <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-      <span className="text-[10px] font-mono tracking-[0.25em] uppercase" style={{ color }}>{children}</span>
+    <div ref={ref} onMouseMove={onMove} onMouseLeave={onLeave} className={className} style={{ ...style, transformStyle: "preserve-3d", transition: "transform 0.45s cubic-bezier(0.16,1,0.3,1), box-shadow 0.35s ease, border-color 0.35s ease", willChange: "transform" } as any}>
+      <span className="tilt-glow absolute inset-0 rounded-2xl pointer-events-none opacity-0 transition-opacity duration-300" aria-hidden />
+      <span className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" style={{ boxShadow: "0 0 0 1px rgba(16,185,129,0.10), 0 18px 36px rgba(0,0,0,0.07)" }} aria-hidden />
+      {children}
     </div>
   );
 }
 
-// ─── Pipeline step ───
-const PIPELINE_STEPS = [
-  { label: "Memory Request", icon: "→", color: "#38bdf8" },
-  { label: "Authenticate", icon: "🔐", color: "#10B981" },
-  { label: "Constraint Check", icon: "📌", color: "#10B981" },
-  { label: "Poisoning Scan", icon: "🔍", color: "#f59e0b" },
-  { label: "Decision", icon: "⚡", color: "#10B981" },
-  { label: "SHA-256 Hash", icon: "#", color: "#a78bfa" },
-  { label: "Hash Chain", icon: "⛓", color: "#a78bfa" },
-  { label: "Digital Signature", icon: "✍", color: "#38bdf8" },
-  { label: "Persist", icon: "💾", color: "#10B981" },
-  { label: "Audit", icon: "📋", color: "#10B981" },
+const PROOFS = [
+  { label: "hash-chain (seed+prev_hash)", detail: "Every memory links to the last — any edit, deletion or reorder breaks the chain instantly." },
+  { label: "ECDSA-P256 · KMS", detail: "Each receipt is signed inside AWS KMS HSM — non-repudiable, CloudTrail-logged proof." },
+  { label: "49 FARMA patterns", detail: "Injection, sleeper & forged-reasoning attacks blocked before they ever reach memory." },
 ];
 
-// ─── System status (checks backend health) ───
-function SystemStatus({ className = "" }: { className?: string }) {
-  const [status, setStatus] = useState<"checking" | "online" | "offline">("checking");
-
-  useEffect(() => {
-    let cancelled = false;
-    const check = async () => {
-      try {
-        const res = await api.health();
-        if (!cancelled) setStatus(res?.status === "ok" || res?.status === "healthy" ? "online" : "offline");
-      } catch {
-        if (!cancelled) setStatus("offline");
-      }
-    };
-    check();
-    const interval = setInterval(check, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, []);
-
-  const config = {
-    checking: { text: "Checking System...", color: "#f59e0b", pulse: true },
-    online: { text: "System Online", color: "#10B981", pulse: true },
-    offline: { text: "System Offline", color: "#ef4444", pulse: false },
-  }[status];
-
-  return (
-    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border ${className}`}
-      style={{ background: withAlpha(config.color, 0.06), borderColor: withAlpha(config.color, 0.13) }}>
-      <div className={`w-1.5 h-1.5 rounded-full ${config.pulse ? "animate-pulse" : ""}`}
-        style={{ background: config.color }} />
-      <span className="text-[10px] font-mono tracking-widest uppercase" style={{ color: config.color }}>
-        {config.text}
-      </span>
-    </div>
-  );
-}
-
-// ─── Live metrics from backend ───
-function LiveMetrics() {
-  const [metrics, setMetrics] = useState<{ constraints: number; memories: number; audit: number } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const token = typeof window !== "undefined" ? localStorage.getItem("agentshield_auth") : null;
-      if (!token) {
-        if (!cancelled) setLoading(false);
-        return;
-      }
-      try {
-        const parsed = JSON.parse(token);
-        const tok = parsed.token;
-        if (!tok) { if (!cancelled) setLoading(false); return; }
-
-        const [constraints, memories, audit] = await Promise.all([
-          api.listConstraints(tok, { limit: 1 }).catch(() => []),
-          api.listMemories(tok, { limit: 1 }).catch(() => []),
-          api.auditEntries(tok, { limit: "1" }).catch(() => ({ entries: [] })),
-        ]);
-
-        if (cancelled) return;
-        const cArr = Array.isArray(constraints) ? constraints : [];
-        const mArr = Array.isArray(memories) ? memories : [];
-        const aData = audit as Record<string, unknown>;
-        const aArr = Array.isArray(aData.entries) ? aData.entries : [];
-
-        setMetrics({
-          constraints: cArr.length,
-          memories: mArr.length,
-          audit: aArr.length,
-        });
-      } catch {
-        // Auth token invalid or backend unavailable
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const items = [
-    { label: "Constraints", value: metrics?.constraints ?? 0, color: "#10B981" },
-    { label: "Memories", value: metrics?.memories ?? 0, color: "#38bdf8" },
-    { label: "Audit Events", value: metrics?.audit ?? 0, color: "#a78bfa" },
-  ];
-
-  return (
-    <div className="grid grid-cols-3 gap-4">
-      {items.map((item) => (
-        <div
-          key={item.label}
-          className="rounded-xl p-5 border border-white/5 bg-white/[0.03] text-center transition-all hover:bg-white/[0.06]"
-        >
-          <div className="text-3xl font-bold" style={{ fontFamily: "var(--font-space-grotesk)", color: item.color }}>
-            {loading ? (
-              <span className="inline-block w-8 h-7 rounded bg-white/5 animate-pulse" />
-            ) : (
-              item.value
-            )}
-          </div>
-          <div className="text-[10px] font-mono tracking-widest uppercase text-white/40 mt-1">{item.label}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Hero metrics (uses auth token to fetch real counts) ───
-function HeroMetrics() {
-  const [data, setData] = useState<{ constraints: number; memories: number; audit: number } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const token = typeof window !== "undefined" ? localStorage.getItem("agentshield_auth") : null;
-      if (!token) return;
-      try {
-        const parsed = JSON.parse(token);
-        const tok = parsed.token;
-        if (!tok) return;
-        const [c, m, a] = await Promise.all([
-          api.listConstraints(tok, { limit: 1 }).catch(() => []),
-          api.listMemories(tok, { limit: 1 }).catch(() => []),
-          api.auditEntries(tok, { limit: "1" }).catch(() => ({ entries: [] })),
-        ]);
-        if (cancelled) return;
-        const aData = a as Record<string, unknown>;
-        setData({
-          constraints: Array.isArray(c) ? c.length : 0,
-          memories: Array.isArray(m) ? m.length : 0,
-          audit: Array.isArray(aData.entries) ? aData.entries.length : 0,
-        });
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const metrics = [
-    { n: data?.constraints ?? 0, label: "Constraints" },
-    { n: data?.memories ?? 0, label: "Memories" },
-    { n: data?.audit ?? 0, label: "Audit Events" },
-  ];
-
-  return (
-    <div className={`mt-12 grid gap-4 border-t border-white/5 pt-8 ${data ? "grid-cols-3" : "grid-cols-3"}`}>
-      {metrics.map((m) => (
-        <div key={m.label}>
-          <div className="text-xl font-bold text-white/90" style={{ fontFamily: "var(--font-space-grotesk)" }}>{m.n}</div>
-          <div className="text-[9px] font-mono tracking-widest uppercase text-white/30 mt-0.5">{m.label}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
+// ─── page ─────────────────────────────────────────────────────────────
 export default function Home() {
-  const heroRef = useRef(null);
-  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
-  const heroOpacity = useTransform(scrollYProgress, [0, 0.6], [1, 0]);
-  const heroY = useTransform(scrollYProgress, [0, 0.6], [0, -60]);
+  const { scrollYProgress } = useScroll();
+  const progress = useSpring(scrollYProgress, { stiffness: 120, damping: 20, restDelta: 0.001 });
+  const heroRef = useRef<HTMLElement>(null);
+  const { scrollY } = useScroll();
+  const heroY = useTransform(scrollY, [0, 600], [0, 90]);
+  const heroOpacity = useTransform(scrollY, [0, 480], [1, 0]);
+  const heroScale = useTransform(scrollY, [0, 520], [1, 0.96]);
+
+  const mag2 = useMagnetic();
+
+  const [typed, setTyped] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTyped(s => (s < 3 ? s + 1 : s)), 520);
+    return () => clearInterval(t);
+  }, []);
+
+  // GSAP ScrollTrigger — subtle parallax + reveal for non-hero sections
+  const problemRef = useRef<HTMLDivElement>(null);
+  const howRef = useRef<HTMLDivElement>(null);
+  const codeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    gsap.registerPlugin(ScrollTrigger);
+    const ctx = gsap.context(() => {
+      gsap.utils.toArray<HTMLElement>("[data-parallax]").forEach((el) => {
+        const speed = parseFloat(el.dataset.parallax || "0.12");
+        gsap.to(el, { yPercent: -speed * 100, ease: "none", scrollTrigger: { trigger: el, start: "top bottom", end: "bottom top", scrub: 0.9 } });
+      });
+    });
+    return () => ctx.revert();
+  }, []);
+
+  const headline = ["Tamper-Evident", "Memory"];
+
+  const [chip, setChip] = useState<number | null>(null);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white overflow-x-hidden">
+    <div className="min-h-screen" style={{ background: "#F8F4ED" }} suppressHydrationWarning>
+      <CursorGlow />
+      {/* scroll progress */}
+      <motion.div
+        className="fixed top-0 left-0 right-0 h-[2px] origin-left z-[60] pointer-events-none"
+        style={{ scaleX: progress, background: "linear-gradient(90deg, #0D7C5F, #10B981 40%, #22D3EE 75%, #A78BFA)" }}
+      />
 
-      {/* ─── NAV ─── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center border-b border-white/5 bg-[#050505]/80 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-6 w-full flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5 group">
-            <div className="w-7 h-7 rounded-lg bg-[#10B981] flex items-center justify-center">
-              <span className="text-black font-bold text-[10px]" style={{ fontFamily: "var(--font-space-grotesk)" }}>AS</span>
-            </div>
-            <span className="text-xs font-bold tracking-[0.2em] uppercase text-white/90" style={{ fontFamily: "var(--font-space-grotesk)" }}>AgentShield</span>
-          </Link>
-          <div className="hidden md:flex items-center gap-8">
-            {[
-              { label: "Overview", href: "#overview" },
-              { label: "Technology", href: "#technology" },
-              { label: "Security", href: "#security" },
-              { label: "Dashboard", href: "/dashboard" },
-            ].map((item) => (
-              item.href.startsWith("/") ? (
-                <Link key={item.label} href={item.href}
-                  className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/50 hover:text-white transition-colors">
-                  {item.label}
-                </Link>
-              ) : (
-                <a key={item.label} href={item.href}
-                  className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/50 hover:text-white transition-colors">
-                  {item.label}
-                </a>
-              )
-            ))}
-          </div>
-          <div className="flex items-center gap-3">
-            <SystemStatus className="hidden md:flex" />
-            <Link href="/dashboard">
-              <button className="px-4 py-2 rounded-lg bg-[#10B981] text-black text-[10px] font-bold tracking-[0.15em] uppercase hover:bg-[#34D399] transition-colors">
-                Open Dashboard
-              </button>
-            </Link>
-          </div>
-        </div>
-      </nav>
+      <SiteNav />
 
-      {/* ─── 01 HERO ─── */}
-      <section ref={heroRef} className="relative min-h-screen flex items-center overflow-hidden pt-14">
+      {/* Hero */}
+      <section ref={heroRef as any} className="relative overflow-hidden min-h-[92vh] flex items-center">
         <HeroShield />
-
-        <motion.div
-          style={{ opacity: heroOpacity, y: heroY }}
-          className="relative z-10 max-w-7xl mx-auto px-6 w-full grid lg:grid-cols-2 gap-12 items-center"
-        >
-          {/* Left */}
-          <div>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 mb-8"
-            >
-              <div className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
-              <span className="text-[9px] font-mono tracking-[0.25em] uppercase text-white/60">A Tamper-Evident Memory Framework</span>
-            </motion.div>
-
-            <motion.h1
-              initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.9, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-              className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tighter leading-[1.05] mb-4"
-              style={{ fontFamily: "var(--font-space-grotesk)" }}
-            >
-              Your agent<br />has memory.
-            </motion.h1>
-
-            <motion.h2
-              initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.9, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tighter leading-[1.05] mb-8"
-              style={{ fontFamily: "var(--font-space-grotesk)" }}
-            >
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#10B981] to-[#34D399]">But can you<br />trust it?</span>
-            </motion.h2>
-
-            <motion.p
-              initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.3 }}
-              className="text-base text-white/50 leading-relaxed mb-10 max-w-md"
-            >
-              AgentShield is a tamper-evident security framework for LLM agent memory. Protect, verify, and audit the long-term memory layer of intelligent agents using cryptographic hash chains and pinned constraints.
-            </motion.p>
-
-            <motion.div
-              initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.4 }}
-              className="flex flex-wrap gap-3"
-            >
-              <Link href="/dashboard">
-                <button className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#10B981] text-black text-xs font-bold tracking-[0.15em] uppercase hover:bg-[#34D399] hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] transition-all">
-                  Open Dashboard
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                  </svg>
-                </button>
-              </Link>
-              <a href="#overview">
-                <button className="px-6 py-3 rounded-lg border border-white/10 text-white/70 text-xs font-bold tracking-[0.15em] uppercase hover:bg-white/5 hover:text-white transition-all">
-                  Learn More
-                </button>
-              </a>
-            </motion.div>
-
-            {/* Metrics row — real data if authenticated, empty states if not */}
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              transition={{ duration: 1, delay: 0.6 }}
-            >
-              <HeroMetrics />
-            </motion.div>
-          </div>
-
-          {/* Right — Architecture diagram */}
+        <motion.div style={{ y: heroY, opacity: heroOpacity, scale: heroScale }} className="max-w-6xl mx-auto px-6 pt-36 pb-16 text-center relative z-10 w-full">
+          {/* Badge — shimmer sweep + sparkle */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 1, delay: 0.3 }}
-            className="relative hidden lg:flex items-center justify-center"
+            initial={{ opacity: 0, y: 14, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+            className="inline-flex items-center gap-2.5 px-5 py-2.5 mb-10 text-xs font-semibold rounded-full backdrop-blur relative overflow-hidden"
+            style={{ background: "rgba(16,185,129,0.13)", color: "#6EE7B7", border: "1px solid rgba(16,185,129,0.28)", letterSpacing: "0.06em", textTransform: "uppercase" }}
           >
-            <div className="relative w-[480px] h-[480px]">
-              {/* Central shield */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="relative">
-                  <div className="absolute -inset-8 rounded-full bg-[#10B981]/10 animate-pulse" />
-                  <div className="absolute -inset-16 rounded-full border border-[#10B981]/10 animate-pulse" style={{ animationDelay: "0.5s" }} />
-                  <div className="absolute -inset-24 rounded-full border border-[#10B981]/5" />
-                  <div className="w-24 h-24 rounded-2xl bg-black border border-[#10B981]/40 flex items-center justify-center shadow-[0_0_40px_rgba(16,185,129,0.2)]">
-                    <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-[#10B981]/20 to-[#10B981]/5 flex items-center justify-center">
-                      <span className="text-2xl font-bold text-[#10B981]" style={{ fontFamily: "var(--font-space-grotesk)" }}>AS</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <span className="w-2 h-2 rounded-full animate-pulse relative" style={{ background: "#10B981", boxShadow: "0 0 14px rgba(16,185,129,0.85)" }}>
+              <span className="absolute inset-0 rounded-full animate-ping" style={{ background: "rgba(16,185,129,0.35)" }} />
+            </span>
+            49 OWASP ASI06 PATTERNS • KMS SIGNED • 10YR RETENTION
+            <motion.span className="absolute inset-0 rounded-full" style={{ background: "linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.22) 50%, transparent 70%)", backgroundSize: "220% 100%" }} animate={{ backgroundPosition: ["-140% 0", "160% 0"] }} transition={{ duration: 2.4, repeat: Infinity, repeatDelay: 2.8, ease: "easeInOut" }} />
+            <Sparkle x={8} y={-6} delay={0.2} />
+            <Sparkle x={208} y={18} delay={0.9} />
+          </motion.div>
 
-              {/* Orbital nodes */}
-              {[
-                { label: "CONSTRAINTS", angle: -90, color: "#10B981", r: 180 },
-                { label: "DETECTION", angle: 0, color: "#38bdf8", r: 180 },
-                { label: "AUDIT TRAIL", angle: 120, color: "#a78bfa", r: 180 },
-                { label: "HASH CHAIN", angle: 240, color: "#f59e0b", r: 180 },
-              ].map((node) => {
-                const pos = polarPosition(node.r, node.angle);
+          {/* Headline — word stagger + editorial serif accent */}
+          <h1 className="text-[44px] sm:text-6xl md:text-[88px] font-black tracking-[-0.045em] mb-7 leading-[0.98]" style={{ fontFamily: "var(--font-space-grotesk)", fontWeight: 800 }}>
+            <motion.span className="block" style={{ color: "#F9FAFB", textShadow: "0 2px 28px rgba(16,185,129,0.22)" }} initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.09 } } }}>
+              {headline.map((w, i) => (
+                <motion.span key={w} variants={{ hidden: { y: 30, opacity: 0, filter: "blur(8px)" }, show: { y: 0, opacity: 1, filter: "blur(0px)", transition: { duration: 0.75, ease: [0.16, 1, 0.3, 1], delay: i * 0.07 } } }} className="inline-block mr-[0.18em]">
+                  {w}
+                </motion.span>
+              ))}
+            </motion.span>
+            <motion.span
+              initial={{ opacity: 0, y: 18, filter: "blur(10px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              transition={{ duration: 0.85, delay: 0.34, ease: [0.16, 1, 0.3, 1] }}
+              className="bg-clip-text text-transparent inline-block italic"
+              style={{ backgroundImage: "linear-gradient(120deg, #6EE7B7 0%, #34D399 22%, #22D3EE 55%, #A78BFA 100%)", WebkitBackgroundClip: "text", fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic", fontWeight: 500, letterSpacing: "-0.015em", paddingBottom: "0.1em" }}
+            >
+              for LLM Agents
+            </motion.span>
+          </h1>
+
+          {/* Sub-copy — lead + interactive proof chips + outcome */}
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.45 }}
+            className="max-w-2xl mx-auto mb-10"
+          >
+            <p className="text-lg md:text-[21px] leading-relaxed font-normal" style={{ color: "rgba(255,255,255,0.82)" }}>
+              AI agents with persistent memory are vulnerable to{" "}
+              <em className="not-italic font-semibold" style={{ color: "#fff" }}>poisoning</em>,{" "}
+              <em className="not-italic font-semibold" style={{ color: "#fff" }}>tampering</em>, and{" "}
+              <em className="not-italic font-semibold" style={{ color: "#fff" }}>silent rule erasure</em>.
+              AgentShield answers with three proofs:
+            </p>
+
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5" role="group" aria-label="AgentShield protections — hover each for detail">
+              {PROOFS.map((p, i) => {
+                const active = chip === i;
                 return (
-                  <div
-                    key={node.label}
-                    className="absolute w-24 h-12 rounded-xl border flex items-center justify-center text-center"
+                  <button
+                    key={p.label}
+                    type="button"
+                    onMouseEnter={() => setChip(i)}
+                    onMouseLeave={() => setChip(null)}
+                    onFocus={() => setChip(i)}
+                    onBlur={() => setChip(null)}
+                    onClick={() => setChip(active ? null : i)}
+                    aria-expanded={active}
+                    className="group relative overflow-hidden rounded-full px-4 py-2 font-mono text-[12px] font-bold tracking-wide transition-all duration-200 hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2"
                     style={{
-                      ...pos,
-                      borderColor: withAlpha(node.color, 0.19),
-                      background: withAlpha(node.color, 0.03),
+                      color: active ? "#06281D" : "#6EE7B7",
+                      background: active ? "linear-gradient(135deg,#6EE7B7,#34D399)" : "rgba(16,185,129,0.1)",
+                      border: `1px solid ${active ? "rgba(110,231,183,0.9)" : "rgba(16,185,129,0.32)"}`,
+                      boxShadow: active ? "0 6px 22px rgba(16,185,129,0.45)" : "inset 0 1px 0 rgba(255,255,255,0.06)",
                     }}
                   >
-                    <span className="text-[8px] font-mono tracking-widest uppercase" style={{ color: node.color }}>{node.label}</span>
-                  </div>
+                    <span className="relative z-10">{p.label}</span>
+                  </button>
                 );
               })}
-
-              {/* Top/bottom labels */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 text-center">
-                <div className="text-[10px] font-mono tracking-widest uppercase text-white/40">LLM AGENT</div>
-                <div className="w-px h-8 bg-gradient-to-b from-white/20 to-transparent mx-auto mt-1" />
-              </div>
-              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center">
-                <div className="w-px h-8 bg-gradient-to-t from-white/20 to-transparent mx-auto mb-1" />
-                <div className="text-[10px] font-mono tracking-widest uppercase text-white/40">LONG-TERM MEMORY</div>
-              </div>
-
-              {/* Corner labels */}
-              <div className="absolute top-8 right-0 space-y-1">
-                {["SECURE", "MEMORY", "SAFER AI"].map((t) => (
-                  <div key={t} className="text-right text-[8px] font-mono tracking-widest uppercase text-white/20">{t}</div>
-                ))}
-              </div>
-              <div className="absolute bottom-8 right-0 space-y-1">
-                {["PROTECT", "DETECT", "VERIFY", "RECORD"].map((t) => (
-                  <div key={t} className="text-right text-[8px] font-mono tracking-widest uppercase text-[#10B981]/50">{t}</div>
-                ))}
-              </div>
             </div>
+
+            <div className="mt-3 min-h-[26px]" aria-live="polite">
+              <AnimatePresence mode="wait">
+                <motion.p
+                  key={chip === null ? "idle" : chip}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.25 }}
+                  className="text-[13.5px] font-mono"
+                  style={{ color: chip === null ? "rgba(255,255,255,0.42)" : "#6EE7B7" }}
+                >
+                  {chip === null ? "— hover a proof to see how it works —" : PROOFS[chip].detail}
+                </motion.p>
+              </AnimatePresence>
+            </div>
+
+            <p className="mt-4 text-xl md:text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-space-grotesk)", color: "#fff" }}>
+              <span
+                className="bg-clip-text text-transparent"
+                style={{ backgroundImage: "linear-gradient(120deg,#34D399,#22D3EE)", WebkitBackgroundClip: "text" }}
+              >
+                0% violation
+              </span>{" "}
+              <span className="font-normal" style={{ color: "rgba(255,255,255,0.6)" }}>at</span>{" "}
+              <span className="relative inline-block">
+                &lt;0.5% overhead
+                <motion.span className="absolute -bottom-1 left-0 right-0 h-[2px] rounded-full" style={{ background: "linear-gradient(90deg,#34D399,#22D3EE,#A78BFA)", boxShadow: "0 0 14px rgba(52,211,153,0.6)" }} initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.9, delay: 1.1 }} />
+              </span>
+            </p>
+          </motion.div>
+
+          {/* CTAs — magnetic + sparkle */}
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.58 }} className="flex items-center justify-center gap-4 mb-16">
+            <Link href="/register" ref={mag2} className="inline-block will-change-transform">
+              <Button size="lg" className="text-white px-10 h-14 rounded-2xl font-bold text-base relative overflow-hidden group" style={{ background: "linear-gradient(135deg, #0D7C5F 0%, #10B981 100%)", boxShadow: "0 6px 22px rgba(16,185,129,0.42)" }}>
+                <span className="relative z-10 flex items-center">Start Free <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg></span>
+                <motion.span className="absolute inset-0 opacity-0 group-hover:opacity-100" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)", backgroundSize: "200% 100%" }} animate={{ backgroundPosition: ["-80% 0", "180% 0"] }} transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 0.6 }} />
+              </Button>
+            </Link>
+            <a href="#how-it-works" className="inline-block">
+              <Button size="lg" variant="outline" className="h-14 px-8 rounded-2xl font-semibold text-base backdrop-blur relative overflow-hidden group/how" style={{ borderColor: "rgba(255,255,255,0.16)", color: "#fff", background: "rgba(255,255,255,0.08)" }}>
+                <span className="relative z-10">How It Works</span>
+                <span className="absolute inset-0 opacity-0 group-hover/how:opacity-100 transition-opacity" style={{ background: "rgba(255,255,255,0.08)" }} />
+              </Button>
+            </a>
+          </motion.div>
+
+          {/* Terminal — tilt + glow + type indicators */}
+          <motion.div
+            initial={{ opacity: 0, y: 28, rotateX: 8 }}
+            animate={{ opacity: 1, y: 0, rotateX: 0 }}
+            transition={{ duration: 0.85, delay: 0.62, ease: [0.16, 1, 0.3, 1] }}
+            className="max-w-3xl mx-auto group/term"
+            style={{ perspective: "1200px" }}
+            whileHover={{ y: -4 }}
+          >
+            <div className="rounded-2xl overflow-hidden backdrop-blur-xl relative" style={{ background: "rgba(22,22,22,0.92)", boxShadow: "0 28px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(16,185,129,0.16), 0 0 44px rgba(16,185,129,0.11)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <div className="absolute -inset-[1px] rounded-2xl opacity-0 group-hover/term:opacity-100 transition-opacity pointer-events-none" style={{ background: "linear-gradient(120deg, rgba(16,185,129,0.22), rgba(34,211,238,0.16), rgba(167,139,250,0.16))", filter: "blur(14px)" }} />
+              <div className="flex items-center gap-2 px-5 py-3 relative" style={{ background: "rgba(34,34,34,0.95)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <span className="w-3 h-3 rounded-full" style={{ background: "#FF5F56", boxShadow: "0 0 8px rgba(255,95,86,0.5)" }} />
+                <span className="w-3 h-3 rounded-full" style={{ background: "#FFBD2E", boxShadow: "0 0 8px rgba(255,189,46,0.5)" }} />
+                <span className="w-3 h-3 rounded-full" style={{ background: "#27C93F", boxShadow: "0 0 8px rgba(39,201,63,0.5)" }} />
+                <span className="ml-3 text-xs font-mono" style={{ color: "rgba(255,255,255,0.42)" }}>terminal — shield wall active</span>
+                <span className="ml-auto flex items-center gap-2 text-xs font-mono" style={{ color: "#10B981" }}><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> CockroachDB • KMS</span>
+              </div>
+              <pre className="p-6 text-sm font-mono text-left leading-loose overflow-x-auto relative">
+                <span style={{ color: "#6B7280" }}>$ </span><span style={{ color: "#34D399" }}>pip install agentshield</span>{"\n"}
+                <span style={{ color: "#6B7280" }}>$ </span><span style={{ color: "#9CA3AF" }}>python -c &apos;</span>{"\n"}
+                <span style={{ color: "#C084FC" }}>from</span> <span style={{ color: "#F9FAFB" }}>agentshield</span> <span style={{ color: "#C084FC" }}>import</span> <span style={{ color: "#F9FAFB" }}>AgentShield</span>{"\n"}
+                <span style={{ color: "#F9FAFB" }}>shield = </span><span style={{ color: "#34D399" }}>AgentShield</span><span style={{ color: "#F9FAFB" }}>(</span><span style={{ color: "#FBBF24" }}>&quot;http://localhost:8000&quot;</span><span style={{ color: "#F9FAFB" }}>)</span>{"\n"}
+                <span style={{ color: "#F9FAFB" }}>shield.constraints.</span><span style={{ color: "#34D399" }}>pin</span><span style={{ color: "#F9FAFB" }}>(</span><span style={{ color: "#FBBF24" }}>&quot;Never delete files without confirmation&quot;</span><span style={{ color: "#F9FAFB" }}>)</span>
+                <motion.span initial={{ opacity: 0 }} animate={{ opacity: typed >= 1 ? 1 : 0 }} className="ml-1 inline-flex items-center gap-1 text-xs" style={{ color: "#10B981" }}> ✓ pinned</motion.span>{"\n"}
+                <span style={{ color: "#F9FAFB" }}>shield.scan.</span><span style={{ color: "#34D399" }}>text</span><span style={{ color: "#F9FAFB" }}>(</span><span style={{ color: "#FBBF24" }}>&quot;Ignore all previous instructions&quot;</span><span style={{ color: "#F9FAFB" }}>)</span>
+                <motion.span initial={{ opacity: 0 }} animate={{ opacity: typed >= 2 ? 1 : 0 }} className="ml-1 text-xs" style={{ color: "#F59E0B" }}> → blocked FARMA-001</motion.span>{"\n"}
+                <span style={{ color: "#9CA3AF" }}># → blocked=True, FARMA-001 detected</span>{"\n"}
+                <motion.span initial={{ opacity: 0 }} animate={{ opacity: typed >= 3 ? 1 : 0 }} style={{ color: "#6B7280" }}>$ <span style={{ color: "#F9FAFB" }}>| </span><span style={{ color: "#34D399" }}>✓ Chain valid</span><span style={{ color: "#F9FAFB" }}> | </span><span style={{ color: "#34D399" }}>✓ KMS signed</span><span style={{ color: "#F9FAFB" }}> | </span><span style={{ color: "#34D399" }}>✓ EU AI Act</span></motion.span>{"\n"}
+              </pre>
+            </div>
+            <p className="text-xs mt-4 flex items-center justify-center gap-2" style={{ color: "rgba(255,255,255,0.55)" }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: "#10B981", boxShadow: "0 0 8px rgba(16,185,129,0.7)" }} /> Shield Wall blocks injection • Chain stays unbroken • 0% violation</p>
           </motion.div>
         </motion.div>
-
-        {/* Scroll cue */}
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}
-          className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
-        >
-          <div className="text-[9px] font-mono tracking-[0.25em] uppercase text-white/30">Scroll to explore</div>
-          <div className="w-px h-8 bg-gradient-to-b from-white/20 to-transparent" />
-        </motion.div>
       </section>
 
-      {/* ─── 02 THE MEMORY PROBLEM ─── */}
-      <section id="overview" className="py-32 border-t border-white/5 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#10B981]/[0.02] to-transparent pointer-events-none" />
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            <div>
-              <Reveal>
-                <Tag color="#38bdf8">The Problem</Tag>
-                <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6 leading-tight" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-                  Your agent<br />remembers.
-                </h2>
-                <p className="text-white/50 text-base leading-relaxed mb-6">
-                  Persistent memory allows an agent to reuse information across future interactions. But information stored in memory cannot automatically be assumed trustworthy.
-                </p>
-                <p className="text-white/30 text-sm leading-relaxed">
-                  If malicious or incorrect information enters memory, it can lead to unsafe, unexpected, or harmful agent behavior — across every future interaction.
-                </p>
-              </Reveal>
-            </div>
-            <div>
-              <Reveal delay={0.2}>
-                {/* Flow diagram */}
-                <div className="space-y-0">
-                  {[
-                    { label: "INTERACTION", sub: "User, tools, env", color: "#38bdf8" },
-                    { label: "MEMORY", sub: "Stored for future use", color: "#10B981" },
-                    { label: "FUTURE BEHAVIOR", sub: "Influences decisions", color: "#a78bfa" },
-                  ].map((step, i) => (
-                    <div key={step.label}>
-                      <div className="flex items-center gap-4 p-5 rounded-xl border bg-white/[0.02] transition-all hover:bg-white/[0.04]"
-                        style={{ borderColor: withAlpha(step.color, 0.13) }}>
-                        <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: withAlpha(step.color, 0.06), border: `1px solid ${withAlpha(step.color, 0.13)}` }}>
-                          <span className="text-lg">{i === 0 ? "💬" : i === 1 ? "🗄️" : "🧠"}</span>
-                        </div>
-                        <div>
-                          <div className="text-xs font-mono tracking-widest uppercase font-bold" style={{ color: step.color }}>{step.label}</div>
-                          <div className="text-xs text-white/40 mt-0.5">{step.sub}</div>
-                        </div>
-                      </div>
-                      {i < 2 && <div className="flex justify-center py-2"><div className="w-px h-6 bg-white/10" /></div>}
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-8 p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                  <p className="text-xs text-white/50 leading-relaxed">
-                    <span className="text-white/80 font-medium">Memory changes the future behavior of an agent.</span> This is why memory integrity is not optional — it is foundational.
-                  </p>
-                </div>
-              </Reveal>
-            </div>
+      <HeroSeam />
+
+      {/* Problem — editorial */}
+      <section ref={problemRef as any} className="pt-24 pb-28 relative z-10 overflow-hidden" style={{ background: "linear-gradient(to bottom, #F8F4ED 0%, #F4EEE2 60%, #F6F1E7 100%)" }}>
+        <div className="absolute inset-0 pointer-events-none" data-parallax="0.06" style={{ background: "radial-gradient(ellipse 760px 300px at 50% -8%, rgba(16,185,129,0.08), transparent 70%), radial-gradient(ellipse 700px 420px at 12% 18%, rgba(194,59,59,0.07), transparent 70%), radial-gradient(ellipse 600px 380px at 90% 100%, rgba(13,124,95,0.05), transparent 70%)" }} />
+        {/* watermark */}
+        <div className="pointer-events-none absolute inset-x-0 top-6 select-none overflow-hidden" aria-hidden="true">
+          <div className="text-center font-black leading-none tracking-[-0.03em]" style={{ fontFamily: "var(--font-space-grotesk)", fontSize: "clamp(90px, 19vw, 260px)", color: "transparent", WebkitTextStroke: "1.5px rgba(194,59,59,0.09)" }}>
+            DECAY
           </div>
         </div>
-      </section>
-
-      {/* ─── 03 THE ATTACK ─── */}
-      <section className="py-32 border-t border-white/5 relative overflow-hidden bg-black/40">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            <Reveal delay={0.2}>
-              {/* Attack flow */}
-              <div className="space-y-0">
-                {[
-                  { label: "MALICIOUS INPUT", sub: "Injected information", icon: "⚠️", color: "#ef4444" },
-                  { label: "POISONED MEMORY", sub: "Corrupts context", icon: "☠️", color: "#ef4444" },
-                  { label: "HARMFUL BEHAVIOR", sub: "Unsafe actions", icon: "🔴", color: "#ef4444" },
-                ].map((step, i) => (
-                  <div key={step.label}>
-                    <div className="flex items-center gap-4 p-5 rounded-xl border bg-red-500/[0.03] transition-all"
-                      style={{ borderColor: "#ef444420" }}>
-                      <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-red-500/10 border border-red-500/20">
-                        <span className="text-lg">{step.icon}</span>
-                      </div>
-                      <div>
-                        <div className="text-xs font-mono tracking-widest uppercase font-bold text-red-400">{step.label}</div>
-                        <div className="text-xs text-white/40 mt-0.5">{step.sub}</div>
-                      </div>
-                    </div>
-                    {i < 2 && <div className="flex justify-center py-2"><div className="w-px h-6 bg-red-500/20" /></div>}
-                  </div>
-                ))}
-              </div>
-              <div className="mt-8 p-4 rounded-xl bg-red-500/[0.04] border border-red-500/10">
-                <p className="text-xs font-mono tracking-wide uppercase text-red-400/80 mb-2">Real risks include:</p>
-                {["Prompt injection", "Indirect manipulation", "False information", "Behavioral drift", "Persistence of unsafe rules"].map((r) => (
-                  <div key={r} className="flex items-center gap-2 py-1">
-                    <div className="w-1 h-1 rounded-full bg-red-400" />
-                    <span className="text-xs text-white/50">{r}</span>
-                  </div>
-                ))}
-              </div>
-            </Reveal>
-            <div>
-              <Reveal>
-                <Tag color="#ef4444">The Threat</Tag>
-                <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6 leading-tight" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-                  But memory<br />can be poisoned.
-                </h2>
-                <p className="text-white/50 text-base leading-relaxed mb-8">
-                  Attackers can inject misleading, harmful or manipulating information into an agent&apos;s memory through indirect prompts, tool outputs, or environmental data.
-                </p>
-                <a href="#technology">
-                  <button className="px-5 py-2.5 rounded-lg border border-white/10 text-xs font-mono tracking-widest uppercase text-white/60 hover:text-white hover:bg-white/5 transition-all">
-                    See how detection works →
-                  </button>
-                </a>
-              </Reveal>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── 04 AGENTSHIELD ─── */}
-      <section id="technology" className="py-32 border-t border-white/5 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-[#10B981]/[0.03] to-transparent pointer-events-none" />
-        <div className="max-w-7xl mx-auto px-6">
+        <div className="max-w-6xl mx-auto px-6 relative">
           <Reveal>
-            <Tag color="#10B981">The Solution</Tag>
+            <div className="mb-6 flex items-center justify-center gap-4">
+              <span className="hidden h-px w-16 sm:block" style={{ background: "linear-gradient(90deg, transparent, rgba(194,59,59,0.5))" }} aria-hidden="true" />
+              <motion.span initial={{ letterSpacing: "0.18em", opacity: 0 }} whileInView={{ letterSpacing: "0.32em", opacity: 1 }} viewport={{ once: true }} transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }} className="text-xs font-bold tracking-widest uppercase inline-block" style={{ color: "#C23B3B" }}>Why This Matters</motion.span>
+              <span className="hidden h-px w-16 sm:block" style={{ background: "linear-gradient(90deg, rgba(194,59,59,0.5), transparent)" }} aria-hidden="true" />
+            </div>
           </Reveal>
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            <div>
-              <Reveal>
-                <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6 leading-tight" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-                  AgentShield.
-                </h2>
-                <p className="text-xl text-white/60 mb-4 font-light leading-relaxed">A security layer between the agent and its memory.</p>
-                <p className="text-white/40 text-sm leading-relaxed mb-8">
-                  AgentShield enforces safety through constraint pinning, poisoning detection, cryptographic hash chains, digital signatures, and audit trails.
-                </p>
-                {/* LLM → AS → MEM flow */}
-                <div className="flex items-center gap-3 mb-8">
-                  {["LLM AGENT", "AGENTSHIELD", "LONG-TERM MEMORY"].map((label, i) => (
-                    <div key={label} className="flex items-center gap-3">
-                      <div className="text-center">
-                        <div className={`w-16 h-16 rounded-xl border flex items-center justify-center mb-2 ${i === 1 ? "border-[#10B981]/40 bg-[#10B981]/10 shadow-[0_0_20px_rgba(16,185,129,0.15)]" : "border-white/10 bg-white/[0.02]"}`}>
-                          <span className="text-xl">{i === 0 ? "🤖" : i === 1 ? "🛡️" : "🗄️"}</span>
-                        </div>
-                        <div className="text-[8px] font-mono tracking-widest uppercase text-white/40">{label}</div>
-                        {i === 1 && <div className="text-[7px] font-mono text-[#10B981]/60 mt-0.5">Protect · Detect · Verify · Record</div>}
-                      </div>
-                      {i < 2 && <div className="flex-shrink-0 text-white/20 text-lg">→</div>}
-                    </div>
-                  ))}
-                </div>
-                <a href="#architecture">
-                  <button className="px-5 py-2.5 rounded-lg border border-white/10 text-xs font-mono tracking-widest uppercase text-white/60 hover:text-white hover:bg-white/5 transition-all">
-                    Explore the architecture →
-                  </button>
-                </a>
-              </Reveal>
-            </div>
-            <Reveal delay={0.2}>
-              <div className="space-y-3">
-                {[
-                  { icon: "📌", title: "Constraint Pinning", desc: "Quarantine safety rules from context compaction.", color: "#10B981" },
-                  { icon: "🔍", title: "Memory Poisoning Detection", desc: "49 detection patterns configured across 7 categories.", color: "#10B981" },
-                  { icon: "#", title: "SHA-256 Hash Chain", desc: "Cryptographically linked, tamper-evident chain.", color: "#10B981" },
-                  { icon: "✍️", title: "Digital Signature Verification", desc: "ECDSA-P256 signatures via AWS KMS.", color: "#10B981" },
-                  { icon: "📋", title: "Audit Trail", desc: "Hash-chained audit for every operation.", color: "#10B981" },
-                  { icon: "⏱️", title: "Historical Verification", desc: "Time-travel forensics via CockroachDB MVCC.", color: "#10B981" },
-                ].map((feature) => (
-                  <div key={feature.title} className="flex items-start gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/5 hover:border-[#10B981]/20 hover:bg-[#10B981]/[0.03] transition-all group">
-                    <div className="w-8 h-8 rounded-lg bg-[#10B981]/10 border border-[#10B981]/20 flex items-center justify-center text-sm shrink-0 mt-0.5">
-                      {feature.icon}
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-white/80 uppercase tracking-widest group-hover:text-[#10B981] transition-colors">{feature.title}</div>
-                      <div className="text-xs text-white/40 mt-1">{feature.desc}</div>
-                    </div>
-                    <svg className="w-3 h-3 text-white/20 group-hover:text-[#10B981] transition-colors ml-auto mt-1 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                ))}
-              </div>
-            </Reveal>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── INTEGRATION CODE ─── */}
-      <section className="py-32 border-t border-white/5 bg-black/60">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            <div>
-              <Reveal>
-                <Tag color="#38bdf8">Integration</Tag>
-                <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6 leading-tight" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-                  Zero-friction<br />protocol.
-                </h2>
-                <p className="text-white/50 text-base leading-relaxed mb-8">
-                  Secure your agent&apos;s memory pipeline in three steps. Constraint pinning ensures critical rules survive context compaction, while hash chains guarantee integrity.
-                </p>
-                <div className="space-y-4">
-                  {[
-                    { title: "Constraint Pinning", desc: "Quarantine safety rules from being overwritten." },
-                    { title: "Poisoning Detection", desc: "Scan inputs against 49 configured attack patterns." },
-                    { title: "Hash Chain Storage", desc: "Link memories cryptographically for tamper-evidence." },
-                  ].map((f) => (
-                    <div key={f.title} className="flex gap-3">
-                      <div className="w-5 h-5 rounded-full bg-[#10B981]/10 border border-[#10B981]/20 flex items-center justify-center shrink-0 mt-0.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold uppercase tracking-widest text-white/80">{f.title}</div>
-                        <div className="text-xs text-white/40 mt-0.5">{f.desc}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-8">
-                  <p className="text-[10px] font-mono tracking-widest uppercase text-white/30 mb-2">Simple to integrate. Powerful protection.</p>
-                  <Link href="/docs" className="text-xs text-[#10B981] hover:text-[#34D399] transition-colors font-mono tracking-wider">View Documentation →</Link>
-                </div>
-              </Reveal>
-            </div>
-            <Reveal delay={0.2}>
-              <div className="relative">
-                <div className="absolute -inset-1 bg-gradient-to-r from-[#10B981]/20 to-[#38bdf8]/10 rounded-2xl blur-xl opacity-50" />
-                <div className="relative rounded-2xl bg-[#0a0a0a] border border-white/10 overflow-hidden">
-                  <div className="flex items-center px-4 py-3 border-b border-white/5 bg-black/50">
-                    <div className="flex gap-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-white/10" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-white/10" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-white/10" />
-                    </div>
-                    <div className="mx-auto text-[9px] font-mono text-white/30 tracking-widest uppercase">agent_memory.py</div>
-                  </div>
-                  <pre className="p-6 text-sm font-mono leading-relaxed overflow-x-auto text-white/60">
-                    <span className="text-[#38bdf8]">from</span>{" agentshield "}<span className="text-[#38bdf8]">import</span>{" AgentShield\n\n"}
-                    {"shield = AgentShield("}<span className="text-[#10B981]">{`"http://localhost:8000"`}</span>{")\n\n"}
-                    <span className="text-white/25"># 1. Pin critical constraint</span>{"\n"}
-                    {"shield.constraints.pin(\n  "}<span className="text-[#10B981]">{`"Never execute arbitrary commands"`}</span>{"\n)\n\n"}
-                    <span className="text-white/25"># 2. Store memory (auto hash-chained)</span>{"\n"}
-                    {"shield.memory.store(\n  "}<span className="text-[#10B981]">{`"User prefers strict validation"`}</span>{"\n)\n\n"}
-                    <span className="text-white/25"># 3. Audit verification</span>{"\n"}
-                    <span className="text-[#38bdf8]">assert</span>{" shield.audit.verify().valid"}
-                  </pre>
-                </div>
-              </div>
-            </Reveal>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── 12 SECURITY PIPELINE ─── */}
-      <section id="architecture" className="py-32 border-t border-white/5">
-        <div className="max-w-4xl mx-auto px-6 text-center">
-          <Reveal>
-            <Tag color="#a78bfa">Architecture</Tag>
-            <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 leading-tight" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-              The security pipeline.
+          <Reveal delay={0.06}>
+            <h2 className="text-5xl md:text-7xl font-black text-center mb-6 tracking-[-0.035em] leading-[1.02]" style={{ fontFamily: "var(--font-space-grotesk)", color: "#1A1A1A" }}>
+              The{" "}
+              <span className="italic" style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontWeight: 500, color: "#C23B3B", letterSpacing: "-0.01em" }}>
+                Problem
+              </span>
             </h2>
-            <p className="text-white/50 text-base mb-16 max-w-xl mx-auto">
-              Every memory write passes through the full AgentShield pipeline before being persisted and recorded.
+          </Reveal>
+          <Reveal delay={0.12}>
+            <p className="text-lg md:text-xl text-center max-w-3xl mx-auto mb-14 leading-relaxed" style={{ color: "#5A5248" }}>
+              Safety violations jump from{" "}
+              <strong className="relative inline-block whitespace-nowrap" style={{ color: "#C23B3B" }}>
+                0% → 30%
+                <span className="absolute -bottom-0.5 left-0 right-0 h-[2px] rounded-full" style={{ background: "linear-gradient(90deg,#C23B3B,#ef4444)", boxShadow: "0 0 10px rgba(194,59,59,0.4)" }} aria-hidden="true" />
+              </strong>{" "}
+              after compaction. Attacks reach{" "}
+              <strong style={{ color: "#1A1A1A" }}>99.8%</strong> on GPT-5.5.{" "}
+              <span style={{ color: "#1A1A1A", fontWeight: 600 }}>No existing system</span> combines preservation, integrity, and audit.
             </p>
           </Reveal>
-
-          <div className="relative">
-            <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-white/10 to-transparent -translate-x-1/2" />
-            <div className="space-y-3">
-              {PIPELINE_STEPS.map((step, i) => (
-                <Reveal key={step.label} delay={i * 0.05}>
-                  <div className={`flex items-center gap-6 ${i % 2 === 0 ? "justify-start" : "justify-end"}`}>
-                    {i % 2 !== 0 && <div className="flex-1" />}
-                    <div className="flex items-center gap-3 px-5 py-3 rounded-xl border bg-white/[0.02] hover:bg-white/[0.04] transition-all w-64"
-                      style={{ borderColor: withAlpha(step.color, 0.13) }}>
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0"
-                        style={{ background: withAlpha(step.color, 0.08), border: `1px solid ${withAlpha(step.color, 0.13)}` }}>
-                        {step.icon}
-                      </div>
-                      <span className="text-xs font-mono tracking-widest uppercase" style={{ color: step.color }}>{step.label}</span>
-                    </div>
-                    {i % 2 === 0 && <div className="flex-1" />}
+          <div className="grid gap-6 md:grid-cols-3">
+            {[
+              { rank: "01", stat: "30%", label: "Violation Rate", desc: "after context compaction. Soft policies decay 8.3× faster than hard safety norms.", chip: "8.3× decay" },
+              { rank: "02", stat: "99.8%", label: "Attack Success", desc: "memory poisoning rate on GPT-5.5 via delayed sleeper poisoning technique.", chip: "sleeper attack" },
+              { rank: "03", stat: "188", label: "Known Incidents", desc: "verified cases of AI agents causing enterprise damage with no attacker involved.", chip: "no attacker" },
+            ].map((card, i) => (
+              <Reveal key={i} delay={0.08 + i * 0.08}>
+                <TiltCard className="group relative rounded-3xl p-8 overflow-hidden transition-shadow duration-300 hover:shadow-[0_24px_60px_rgba(194,59,59,0.14)]" style={{ background: "rgba(255,255,255,0.85)", backdropFilter: "blur(16px)", border: "1px solid rgba(0,0,0,0.05)", boxShadow: "0 2px 14px rgba(0,0,0,0.04)" } as any} glow="rgba(194,59,59,0.14)">
+                  <span className="absolute inset-x-0 top-0 h-[3px] origin-left scale-x-0 transition-transform duration-500 group-hover:scale-x-100" style={{ background: "linear-gradient(90deg,#C23B3B,#ef4444,#D4A843)" }} aria-hidden="true" />
+                  <div className="mb-5 flex items-start justify-between">
+                    <span className="font-mono text-[11px] font-bold tracking-[0.2em]" style={{ color: "rgba(194,59,59,0.55)" }}>{card.rank}</span>
+                    <span className="rounded-full px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.12em] transition-all duration-300 group-hover:-translate-y-0.5" style={{ background: "rgba(194,59,59,0.08)", color: "#C23B3B", border: "1px solid rgba(194,59,59,0.16)" }}>{card.chip}</span>
                   </div>
-                </Reveal>
-              ))}
-            </div>
+                  <motion.div className="font-black tracking-tight" style={{ fontFamily: "var(--font-space-grotesk)", fontSize: 58, lineHeight: 1, color: "#C23B3B", textShadow: "0 2px 22px rgba(194,59,59,0.18)" }} initial={{ scale: 0.9, filter: "blur(4px)" }} whileInView={{ scale: 1, filter: "blur(0px)" }} viewport={{ once: true }} transition={{ duration: 0.6, delay: 0.12 + i * 0.06 }}>{card.stat}</motion.div>
+                  <div className="mt-3 text-sm font-bold uppercase tracking-wider" style={{ color: "#1A1A1A" }}>{card.label}</div>
+                  <p className="mt-2 text-sm leading-relaxed" style={{ color: "#5A5248" }}>{card.desc}</p>
+                </TiltCard>
+              </Reveal>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* ─── 13 COMMAND CENTER ─── */}
-      <section id="security" className="py-32 border-t border-white/5 bg-black/40">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <Reveal>
-              <Tag color="#10B981">Command Center</Tag>
-              <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-4" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-                See the memory defense<br />in action.
-              </h2>
-              <p className="text-white/50 text-base max-w-xl mx-auto">
-                The AgentShield Command Center gives you a real-time view of your agent&apos;s security posture. Every metric comes directly from the backend.
-              </p>
-            </Reveal>
+      {/* How it works — editorial mechanism */}
+      <section ref={howRef as any} id="how-it-works" className="py-28 relative z-10 overflow-hidden" style={{ background: "linear-gradient(to bottom, #F6F1E7 0%, #EFE9DB 55%, #F8F4ED 100%)" }}>
+        <div className="absolute inset-0 pointer-events-none" data-parallax="0.08" style={{ background: "radial-gradient(ellipse 820px 520px at 50% -10%, rgba(13,124,95,0.08), transparent 70%), radial-gradient(ellipse 640px 420px at 100% 90%, rgba(107,79,160,0.07), transparent 70%)" }} />
+        <div className="pointer-events-none absolute inset-x-0 top-8 select-none overflow-hidden" aria-hidden="true">
+          <div className="text-center font-black leading-none tracking-[-0.03em]" style={{ fontFamily: "var(--font-space-grotesk)", fontSize: "clamp(80px, 16vw, 220px)", color: "transparent", WebkitTextStroke: "1.5px rgba(13,124,95,0.10)" }}>
+            SHIELD
           </div>
-          <Reveal delay={0.2}>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-8">
-              <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
-                <div>
-                  <div className="text-xs font-mono tracking-widest uppercase text-white/40 mb-1">Security Overview</div>
-                  <h3 className="text-lg font-bold text-white/90" style={{ fontFamily: "var(--font-space-grotesk)" }}>AgentShield Telemetry</h3>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#10B981]/10 border border-[#10B981]/20">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
-                  <span className="text-[9px] font-mono tracking-widest uppercase text-[#10B981]">Live Backend Data</span>
-                </div>
-              </div>
-              <LiveMetrics />
-              <div className="mt-6 p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-[#38bdf8]/10 border border-[#38bdf8]/20 flex items-center justify-center text-sm shrink-0">
-                    🔍
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white/80 uppercase tracking-widest">Detection Patterns</div>
-                    <div className="text-xs text-white/40 mt-0.5">49 poisoning/manipulation detection patterns configured across 7 categories.</div>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-8 text-center">
-                <Link href="/dashboard">
-                  <button className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-[#10B981] text-black text-xs font-bold tracking-[0.15em] uppercase hover:bg-[#34D399] hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] transition-all">
-                    Open Command Center
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                    </svg>
-                  </button>
-                </Link>
-              </div>
-            </div>
-          </Reveal>
         </div>
-      </section>
-
-      {/* ─── 14 FINAL CTA ─── */}
-      <section className="py-40 border-t border-white/5 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#10B981]/[0.04] pointer-events-none" />
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-[600px] h-[600px] rounded-full bg-[#10B981]/[0.04] blur-[120px]" />
-        </div>
-        <div className="max-w-4xl mx-auto px-6 text-center relative z-10">
+        <div className="max-w-6xl mx-auto px-6 relative">
           <Reveal>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 mb-8">
-              <span className="text-[9px] font-mono tracking-[0.25em] uppercase text-white/50">Ready to secure your agents?</span>
+            <div className="mb-6 flex items-center justify-center gap-4">
+              <span className="hidden h-px w-16 sm:block" style={{ background: "linear-gradient(90deg, transparent, rgba(13,124,95,0.5))" }} aria-hidden="true" />
+              <span className="text-xs font-bold tracking-widest uppercase inline-block" style={{ color: "#0D7C5F", letterSpacing: "0.32em" }}>Mechanism</span>
+              <span className="hidden h-px w-16 sm:block" style={{ background: "linear-gradient(90deg, rgba(13,124,95,0.5), transparent)" }} aria-hidden="true" />
             </div>
-            <h2 className="text-5xl md:text-7xl font-bold tracking-tighter mb-8 leading-tight" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-              Build safer, more<br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#10B981] to-[#34D399]">trustworthy agents.</span>
+          </Reveal>
+          <Reveal delay={0.06}>
+            <h2 className="text-5xl md:text-7xl font-black text-center mb-5 tracking-[-0.035em] leading-[1.02]" style={{ fontFamily: "var(--font-space-grotesk)", color: "#1A1A1A" }}>
+              How It{" "}
+              <span className="italic" style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontWeight: 500, backgroundImage: "linear-gradient(120deg,#0D7C5F,#10B981 55%,#22D3EE)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>
+                Works
+              </span>
             </h2>
-            <p className="text-white/40 text-base mb-12 max-w-xl mx-auto">
-              Start using AgentShield to protect your agent&apos;s memory today.
+          </Reveal>
+          <Reveal delay={0.1}>
+            <p className="text-center text-base md:text-lg max-w-2xl mx-auto mb-14" style={{ color: "#5A5248" }}>
+              Six mechanisms, one pipeline — every memory is{" "}
+              <strong style={{ color: "#0D7C5F" }}>pinned</strong>,{" "}
+              <strong style={{ color: "#0D7C5F" }}>scanned</strong>,{" "}
+              <strong style={{ color: "#0D7C5F" }}>chained</strong> and{" "}
+              <strong style={{ color: "#0D7C5F" }}>signed</strong> before it earns trust.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href="/dashboard">
-                <button className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-[#10B981] text-black text-xs font-bold tracking-[0.15em] uppercase hover:bg-[#34D399] hover:shadow-[0_0_30px_rgba(16,185,129,0.4)] transition-all">
-                  Open Dashboard →
-                </button>
-              </Link>
-              <Link href="/docs">
-                <button className="px-8 py-4 rounded-xl border border-white/10 text-white/70 text-xs font-bold tracking-[0.15em] uppercase hover:bg-white/5 hover:text-white transition-all">
-                  Read the Docs
-                </button>
-              </Link>
+          </Reveal>
+          <div className="grid gap-6 md:grid-cols-2">
+            {[
+              { num: "01", tag: "PIN", title: "Pin Safety Constraints", desc: "Quarantine critical rules from context compaction. They survive summarization and are re-injected verbatim — reducing violations from 30% to 0%.", color: "#0D7C5F" },
+              { num: "02", tag: "HASH", title: "Hash Chain Integrity", desc: "Every memory and audit entry is SHA-256 linked. Any modification, deletion, or reordering breaks the chain — detected instantly on verification.", color: "#0D7C5F" },
+              { num: "03", tag: "SCAN", title: "Detect Poisoning", desc: "49 OWASP ASI06 detection patterns (incl. FARMA forged reasoning + homoglyph) across 7 categories catch known attack signatures before they reach agent memory.", color: "#D4A843" },
+              { num: "04", tag: "SIGN", title: "Cryptographic Signatures", desc: "ECDSA-P256 digital signatures provide non-repudiable integrity. Every sign/verify call is logged for third-party verification.", color: "#D4A843" },
+              { num: "05", tag: "AUDIT", title: "Tamper-Evident Audit", desc: "Hash-chained audit trail records every operation. Generate EU AI Act Article 12 compliance reports automatically.", color: "#6B4FA0" },
+              { num: "06", tag: "SDK", title: "3-Line Integration", desc: "pip install agentshield — one import, one client, three method calls. Works with any LLM agent framework.", color: "#6B4FA0" },
+            ].map((step, i) => (
+              <Reveal key={i} delay={0.04 + i * 0.06}>
+                <TiltCard className="group relative rounded-3xl p-7 flex items-start gap-5 overflow-hidden transition-shadow duration-300 hover:shadow-[0_24px_60px_rgba(0,0,0,0.10)]" style={{ background: "rgba(255,255,255,0.85)", backdropFilter: "blur(16px)", border: "1px solid rgba(0,0,0,0.05)", boxShadow: "0 2px 14px rgba(0,0,0,0.04)" } as any} glow={`${step.color}1f`}>
+                  <span className="absolute inset-x-0 top-0 h-[3px] origin-left scale-x-0 transition-transform duration-500 group-hover:scale-x-100" style={{ background: `linear-gradient(90deg, ${step.color}, ${step.color}88)` }} aria-hidden="true" />
+                  <motion.div whileHover={{ scale: 1.08, rotate: -2 }} transition={{ type: "spring", stiffness: 380 }} className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl relative overflow-hidden" style={{ background: `${step.color}15`, border: `1px solid ${step.color}30`, boxShadow: `0 0 0 rgba(0,0,0,0)` }}>
+                    <span className="text-base font-black leading-none relative z-10" style={{ fontFamily: "var(--font-space-grotesk)", color: step.color }}>{step.num}</span>
+                    <span className="font-mono text-[8px] font-bold tracking-[0.14em] relative z-10" style={{ color: step.color }}>{step.tag}</span>
+                    <motion.span className="absolute inset-0 opacity-0 group-hover:opacity-100" style={{ background: `linear-gradient(120deg, transparent, ${step.color}18, transparent)`, backgroundSize: "200% 100%" }} animate={{ backgroundPosition: ["-100% 0", "160% 0"] }} transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 1.2 + i * 0.3 }} />
+                  </motion.div>
+                  <div className="relative flex-1">
+                    <h3 className="text-lg font-black tracking-tight mb-2 transition-transform duration-300 group-hover:-translate-y-px" style={{ fontFamily: "var(--font-space-grotesk)", color: "#1A1A1A" }}>{step.title}</h3>
+                    <p className="text-sm leading-relaxed" style={{ color: "#5A5248" }}>{step.desc}</p>
+                    <span className="mt-3 inline-flex items-center gap-1 font-mono text-[11px] font-bold opacity-0 -translate-x-2 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-0" style={{ color: step.color }} aria-hidden="true">
+                      {step.tag} → live in dashboard
+                    </span>
+                  </div>
+                  <span className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300"><Sparkle delay={i * 0.15} x={0} y={0} /></span>
+                </TiltCard>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Code Example — reveal + glow */}
+      <section ref={codeRef as any} className="py-28 relative z-10 overflow-hidden" style={{ background: "rgba(255,255,255,0.34)" }}>
+        <div className="absolute inset-0 pointer-events-none" data-parallax="0.05" style={{ background: "radial-gradient(ellipse 760px 420px at 50% 0%, rgba(13,124,95,0.06), transparent 70%)" }} />
+        <div className="max-w-3xl mx-auto px-6 relative">
+          <Reveal>
+            <div className="text-center mb-6">
+              <span className="text-xs font-bold tracking-widest uppercase inline-block" style={{ color: "#0D7C5F", letterSpacing: "0.32em" }}>Developer Experience</span>
             </div>
-            <div className="mt-8 text-[10px] font-mono tracking-widest uppercase text-white/30">
-              Memory You Can Verify.
-            </div>
+          </Reveal>
+          <Reveal delay={0.06}>
+            <h2 className="text-4xl md:text-5xl font-black text-center mb-12 tracking-tight" style={{ fontFamily: "var(--font-space-grotesk)", color: "#1A1A1A" }}>Zero-Friction Integration</h2>
+          </Reveal>
+          <Reveal delay={0.14}>
+            <CodeExplorer />
           </Reveal>
         </div>
       </section>
 
-      {/* ─── FOOTER ─── */}
-      <footer className="border-t border-white/5 py-8 bg-black">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-6 h-6 rounded-md bg-[#10B981] flex items-center justify-center">
-              <span className="text-black font-bold text-[8px]">AS</span>
-            </div>
-            <span className="text-[10px] font-mono tracking-widest uppercase text-white/40">AgentShield</span>
-            <span className="text-white/20 text-xs">—</span>
-            <span className="text-[10px] font-mono text-white/30">A Tamper-Evident Memory Defense for LLM Agents</span>
+      {/* Stats — stagger + tilt */}
+      <section className="py-28 relative z-10 overflow-hidden">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="grid md:grid-cols-4 gap-6">
+            {[
+              { value: "49", label: "Detection Patterns" },
+              { value: "7", label: "Attack Categories" },
+              { value: "0%", label: "Violation Rate" },
+              { value: "<0.5%", label: "Token Overhead" },
+            ].map((s, i) => (
+              <Reveal key={i} delay={i * 0.07}>
+                <TiltCard className="group relative rounded-2xl p-8 text-center overflow-hidden" style={{ background: "rgba(255,255,255,0.78)", backdropFilter: "blur(16px)", border: "1px solid rgba(0,0,0,0.05)", boxShadow: "0 2px 14px rgba(0,0,0,0.04)" } as any} glow="rgba(13,124,95,0.12)">
+                  <motion.div className="text-4xl font-black" style={{ fontFamily: "var(--font-space-grotesk)", color: "#0D7C5F" }} initial={{ y: 10, opacity: 0 }} whileInView={{ y: 0, opacity: 1 }} viewport={{ once: true }} transition={{ duration: 0.55, delay: 0.1 + i * 0.05 }}>{s.value}</motion.div>
+                  <div className="text-sm font-semibold mt-2" style={{ color: "#5A5248" }}>{s.label}</div>
+                  <motion.span className="absolute left-1/2 -translate-x-1/2 bottom-0 h-[2px] rounded-full" style={{ background: "linear-gradient(90deg, transparent, #0D7C5F, transparent)" }} initial={{ width: 0, opacity: 0 }} whileInView={{ width: "66%", opacity: 1 }} viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.35 + i * 0.07 }} />
+                </TiltCard>
+              </Reveal>
+            ))}
           </div>
-          <div className="flex items-center gap-6">
-            <Link href="/dashboard" className="text-[9px] font-mono tracking-widest uppercase text-white/30 hover:text-white/60 transition-colors">
-              Dashboard
-            </Link>
-            <Link href="/login" className="text-[9px] font-mono tracking-widest uppercase text-white/30 hover:text-white/60 transition-colors">
-              Login
-            </Link>
-            <SystemStatus />
-          </div>
+        </div>
+      </section>
+
+      <CTASection />
+
+      <footer className="py-8" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+        <div className="max-w-5xl mx-auto px-6 flex items-center justify-between text-xs" style={{ color: "#7A7164" }}>
+          <div>AgentShield v1.0.0 — Minor Project, BTech CSE AIML</div>
+          <div>ITM University Gwalior</div>
         </div>
       </footer>
     </div>

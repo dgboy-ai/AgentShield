@@ -1,5 +1,6 @@
 "use client";
 export const dynamic = 'force-dynamic';
+import Link from "next/link";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useOwnerAuth } from "../../layout";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -39,7 +40,7 @@ export default function OwnerErrorsPage(){
     <div className="stagger" style={{display:'flex', flexDirection:'column', gap:16}}>
       <div>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          <a href="/owner/dashboard" style={{fontFamily:'var(--font-mono)', fontSize:11, fontWeight:800, color:'#57534e', textDecoration:'none'}}>Dashboard</a>
+          <Link href="/owner/dashboard" style={{fontFamily:'var(--font-mono)', fontSize:11, fontWeight:800, color:'#57534e', textDecoration:'none'}}>Dashboard</Link>
           <span style={{color:'#a8a29e'}}>›</span>
           <span className="welcome-title" style={{fontSize:22}}>Errors & Forensics</span>
           <span className="badge badge-red" style={{marginLeft:8}}>Multi-page • Search • Paginate</span>
@@ -49,7 +50,7 @@ export default function OwnerErrorsPage(){
 
       {error && <div className="panel" style={{padding:14, background:'#fef2f2'}}><span className="badge badge-red">{error}</span> <button onClick={fetchData} className="btn btn-outline" style={{marginLeft:8, padding:'6px 10px'}}>Retry</button></div>}
 
-      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:14}}>
+      <div className="owner-2col">
         <div className="kpi-card" style={{borderColor: blocked.length ? '#ef4444' : '#000'}}>
           <div style={{fontFamily:'var(--font-mono)', fontSize:10, fontWeight:800, letterSpacing:1}}>BLOCKED CONTENT</div>
           <div style={{fontFamily:'var(--font-sg)', fontSize:26, fontWeight:900}}>{blocked.length}</div>

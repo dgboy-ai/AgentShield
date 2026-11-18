@@ -1,5 +1,6 @@
 "use client";
 export const dynamic = 'force-dynamic';
+import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { useOwnerAuth } from "../../layout";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -13,13 +14,13 @@ export default function OwnerHealthPage(){
   return (
     <div className="stagger" style={{display:'flex', flexDirection:'column', gap:16}}>
       <div>
-        <div style={{display:'flex', alignItems:'center', gap:8}}><a href="/owner/dashboard" style={{fontFamily:'var(--font-mono)', fontSize:11, fontWeight:800, color:'#57534e', textDecoration:'none'}}>Dashboard</a><span style={{color:'#a8a29e'}}>›</span><span className="welcome-title" style={{fontSize:22}}>Health</span></div>
+        <div style={{display:'flex', alignItems:'center', gap:8}}><Link href="/owner/dashboard" style={{fontFamily:'var(--font-mono)', fontSize:11, fontWeight:800, color:'#57534e', textDecoration:'none'}}>Dashboard</Link><span style={{color:'#a8a29e'}}>›</span><span className="welcome-title" style={{fontSize:22}}>Health</span></div>
         <p className="welcome-subtitle">DB connectivity, latency, engine, and version — Bastion-style health cockpit for AgentShield.</p>
       </div>
       {error && <div className="panel" style={{padding:12, background:'#fef2f2'}}><span className="badge badge-red">{error}</span> <button onClick={fetchHealth} className="btn btn-outline" style={{marginLeft:8, padding:'6px 10px'}}>Retry</button></div>}
       {loading && !health ? <div className="skeleton" style={{height:120}}/> : health && (
         <>
-          <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:14}}>
+          <div className="owner-3col">
             <div className="kpi-card">
               <div style={{fontFamily:'var(--font-mono)', fontSize:10, fontWeight:800, letterSpacing:1}}>STATUS</div>
               <div style={{display:'flex', alignItems:'center', gap:10, marginTop:4}}>
@@ -46,7 +47,7 @@ export default function OwnerHealthPage(){
               <span style={{fontFamily:'var(--font-mono)', fontSize:11, fontWeight:800, letterSpacing:1}}>ENHANCED CHECKS</span>
               <span className="badge badge-yellow" style={{marginLeft:'auto'}}>Bastion-grade</span>
             </div>
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+            <div className="owner-2col">
               <div className="panel" style={{padding:14}}>
                 <div style={{fontSize:12, fontWeight:800}}>Hash Chain</div>
                 <div style={{fontSize:11, color:'#57534e', marginTop:4}}>SHA-256 linked memories + audit. Any mutation breaks verification — same guarantee as Bastion's persistent memory.</div>

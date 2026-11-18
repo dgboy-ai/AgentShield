@@ -1,5 +1,6 @@
 function resolveApiBase(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
+  const env = (process.env.NEXT_PUBLIC_API_URL || "").trim().replace(/\/+$/, "");
+  if (env) return env;
   if (typeof window !== "undefined") {
     const origin = window.location.origin;
     if (origin.includes(":3000")) return origin.replace(":3000", ":8000");
@@ -12,6 +13,8 @@ function resolveApiBase(): string {
 }
 
 const API_BASE = resolveApiBase();
+const REQUEST_TIMEOUT_MS = 20000;
+let refreshInflight: Promise<unknown> | null = null;
 
 interface ApiOptions {
   method?: string;
@@ -56,23 +59,49 @@ function extractErrorMessage(detail: unknown, fallback: string): string {
   return fallback || "Request failed";
 }
 
+async function parseBody(res: Response): Promise<unknown> {
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  const text = await res.text();
+  if (!text) return null;
+  if (ct.includes("json") || ct.includes("jsonl") || text.trimStart().startsWith("{") || text.trimStart().startsWith("[")) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+  // JSONL / text export — return raw string
+  return text;
+}
+
+async function doFetch(path: string, opts: ApiOptions, headers: Record<string, string>, signal: AbortSignal): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    method: opts.method || "GET",
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    credentials: "include",
+    signal,
+  });
+}
+
 async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
-      method: opts.method || "GET",
-      headers,
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
-      credentials: "include", // for httpOnly refresh/access cookies
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && err.name === "TypeError" && err.message.includes("fetch")) {
-      throw new ApiError("Backend unavailable", 503, { error: err.message });
+    res = await doFetch(path, opts, headers, ctrl.signal);
+  } catch (e) {
+    clearTimeout(timer);
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new ApiError("Request timed out", 0, e);
     }
-    throw err;
+    if (e instanceof Error && e.name === "TypeError" && e.message.includes("fetch")) {
+      throw new ApiError("Backend unavailable", 503, { error: e.message });
+    }
+    throw new ApiError("Network unreachable", 0, e);
   }
 
   const expireSession = () => {
@@ -81,73 +110,62 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     window.dispatchEvent(new CustomEvent("agentshield:auth-expired"));
   };
 
-  // Handle 401 with httpOnly refresh (XSS mitigation) and stored refresh fallback
+  // Single-flight 401 refresh — httpOnly cookie + stored refresh fallback; avoids N concurrent refresh storms
   if (res.status === 401 && !path.includes("/auth/refresh") && !path.includes("/auth/login") && !path.includes("/auth/register")) {
     try {
-      let storedRefreshToken: string | undefined;
-      let parsedAuth: Record<string, unknown> | null = null;
-      if (typeof window !== "undefined") {
+      if (!refreshInflight) {
+        refreshInflight = (async () => {
+          let storedRefreshToken: string | undefined;
+          if (typeof window !== "undefined") {
+            try {
+              const saved = localStorage.getItem("agentshield_auth");
+              if (saved) {
+                const parsedAuth = JSON.parse(saved) as Record<string, unknown>;
+                storedRefreshToken = (parsedAuth?.refreshToken || parsedAuth?.refresh_token) as string | undefined;
+              }
+            } catch {}
+          }
+          const r = await fetch(`${API_BASE}/api/auth/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: storedRefreshToken ? JSON.stringify({ refresh_token: storedRefreshToken }) : undefined,
+            credentials: "include",
+          });
+          if (!r.ok) throw new Error(`refresh ${r.status}`);
+          return parseBody(r);
+        })().finally(() => {
+          refreshInflight = null;
+        });
+      }
+      const refreshData = (await refreshInflight) as Record<string, unknown>;
+      const nextToken = typeof refreshData?.access_token === "string" ? (refreshData.access_token as string) : null;
+      if (typeof window !== "undefined" && nextToken) {
         try {
           const saved = localStorage.getItem("agentshield_auth");
           if (saved) {
-            parsedAuth = JSON.parse(saved);
-            storedRefreshToken = (parsedAuth?.refreshToken || parsedAuth?.refresh_token) as string | undefined;
+            const parsed = JSON.parse(saved) as Record<string, unknown>;
+            parsed.token = nextToken;
+            if (typeof refreshData?.refresh_token === "string") parsed.refreshToken = refreshData.refresh_token;
+            localStorage.setItem("agentshield_auth", JSON.stringify(parsed));
           }
         } catch {}
       }
-
-      const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: storedRefreshToken ? JSON.stringify({ refresh_token: storedRefreshToken }) : undefined,
-        credentials: "include",
-      });
-
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        if (refreshData.access_token) headers["Authorization"] = `Bearer ${refreshData.access_token}`;
-        if (typeof window !== "undefined" && parsedAuth) {
-          parsedAuth.token = refreshData.access_token;
-          if (refreshData.refresh_token) parsedAuth.refreshToken = refreshData.refresh_token;
-          try { localStorage.setItem("agentshield_auth", JSON.stringify(parsedAuth)); } catch {}
-        }
-        res = await fetch(`${API_BASE}${path}`, {
-          method: opts.method || "GET",
-          headers,
-          body: opts.body ? JSON.stringify(opts.body) : undefined,
-          credentials: "include",
-        });
-        if (res.ok) {
-          if (res.status === 204) return undefined as T;
-          const retryType = res.headers.get("content-type") || "";
-          if (retryType.includes("application/json")) return res.json();
-          return (await res.text()) as unknown as T;
-        }
-      } else {
-        // Refresh failed: session expired
-        expireSession();
-      }
+      if (nextToken) headers["Authorization"] = `Bearer ${nextToken}`;
+      res = await doFetch(path, opts, headers, ctrl.signal);
     } catch {
+      // Refresh failed: session expired
       expireSession();
     }
   }
+  clearTimeout(timer);
 
   if (!res.ok) {
-    let detail: unknown;
-    try {
-      detail = await res.json();
-    } catch {
-      detail = await res.text();
-    }
+    const detail = await parseBody(res).catch(() => null);
     throw new ApiError(extractErrorMessage(detail, res.statusText), res.status, detail);
   }
 
   if (res.status === 204) return undefined as T;
-  const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return res.json();
-  }
-  return (await res.text()) as unknown as T;
+  return (await parseBody(res)) as T;
 }
 
 export const api = {
@@ -242,7 +260,7 @@ export const api = {
   auditTimeTravel: (token: string, timestamp: string) =>
     request<Record<string, unknown>>(`/api/audit/time-travel?timestamp=${encodeURIComponent(timestamp)}`, { token }),
   auditDbTimeTravel: (token: string, timestamp: string, table: string = "audit_log") =>
-    request<Record<string, unknown>>(`/api/audit/db-time-travel?timestamp=${encodeURIComponent(timestamp)}&table=${table}`, { token }),
+    request<Record<string, unknown>>(`/api/audit/db-time-travel?timestamp=${encodeURIComponent(timestamp)}&table=${encodeURIComponent(table)}`, { token }),
   complianceReport: (token: string) =>
     request<Record<string, unknown>>("/api/audit/compliance/report", { token }),
   exportJsonl: (token: string) =>
