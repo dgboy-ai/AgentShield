@@ -1,4 +1,4 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
@@ -60,7 +60,7 @@
   --secondary: #EDE8DF;
   --secondary-foreground: #3D3529;
   --muted: #E8E2D8;
-  --muted-foreground: #7A7164;
+  --muted-foreground: #4A443A;
   --accent: #D4A843;
   --accent-foreground: #1A1A1A;
   --destructive: #C23B3B;
@@ -1545,3 +1545,21 @@ select:focus {
   opacity: 0.018;
   background-image: repeating-radial-gradient(circle at 0 0, rgba(255, 255, 255, 0.6) 0, rgba(255, 255, 255, 0.6) 0.5px, transparent 0.5px, transparent 3px);
 }
+
+/* Demo polish: darker panels, bolder text, hover lift */
+.panel-card {
+  background: #ECE7DD;
+  border: 1px solid rgba(26, 26, 26, 0.14);
+  border-radius: 16px;
+  color: #0F172A;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.07), 0 8px 24px rgba(15, 23, 42, 0.06);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+.panel-card:hover {
+  border-color: rgba(13, 124, 95, 0.45);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.1), 0 18px 44px rgba(13, 124, 95, 0.14);
+  transform: translateY(-2px);
+}
+.dashboard-shell h1 { font-weight: 800; }
+.dashboard-shell .font-mono { font-weight: 600; }
+.dashboard-shell { font-weight: 500; }

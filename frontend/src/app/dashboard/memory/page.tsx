@@ -28,9 +28,9 @@ interface ThreatScanResult {
 }
 
 const TYPE_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
-  episodic: { bg: "rgba(167,139,250,0.1)", text: "#A78BFA", border: "rgba(167,139,250,0.2)", label: "Episodic" },
-  semantic: { bg: "rgba(56,189,248,0.1)", text: "#38BDF8", border: "rgba(56,189,248,0.2)", label: "Semantic" },
-  procedural: { bg: "rgba(245,158,11,0.1)", text: "#FBBF24", border: "rgba(245,158,11,0.2)", label: "Procedural" },
+  episodic: { bg: "rgba(167,139,250,0.1)", text: "#7C3AED", border: "rgba(167,139,250,0.2)", label: "Episodic" },
+  semantic: { bg: "rgba(56,189,248,0.1)", text: "#0284C7", border: "rgba(56,189,248,0.2)", label: "Semantic" },
+  procedural: { bg: "rgba(245,158,11,0.1)", text: "#B45309", border: "rgba(245,158,11,0.2)", label: "Procedural" },
 };
 
 export default function MemoryPage() {
@@ -141,40 +141,40 @@ export default function MemoryPage() {
   return (
     <div className="space-y-6 animate-slide-up pb-10">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-border">
         <div>
-          <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-white/30 mb-2">Memory Defense</p>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+          <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-muted-foreground font-medium mb-2">Memory Defense</p>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground" style={{ fontFamily: "var(--font-space-grotesk)" }}>
             Memory Store
           </h1>
-          <p className="text-sm text-white/40 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Store and verify agent episodic, semantic, and procedural memories with cryptographic hash chains.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {verifyResult && (
             <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-mono tracking-widest uppercase border ${
-              isChainValid ? "bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+              isChainValid ? "bg-[#059669]/10 border-[#059669]/20 text-[#059669]" : "bg-rose-500/10 border-rose-500/20 text-rose-600"
             }`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${isChainValid ? "bg-[#10B981] animate-pulse" : "bg-rose-400"}`} />
+              <div className={`w-1.5 h-1.5 rounded-full ${isChainValid ? "bg-[#059669] animate-pulse" : "bg-rose-400"}`} />
               Chain {isChainValid ? "Verified" : "Tampered"}
             </div>
           )}
-          <span className="text-[10px] font-mono tracking-widest uppercase px-3 py-1.5 rounded-lg bg-white/5 text-white/60 border border-white/10">
+          <span className="text-[10px] font-mono tracking-widest uppercase px-3 py-1.5 rounded-lg bg-[#E6E0D4] text-foreground border border-border">
             {memories.length} Entries
           </span>
         </div>
       </div>
 
       {/* Store Memory Form */}
-      <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-6">
+      <div className="panel-card p-6">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-8 h-8 rounded-lg bg-[#8B5CF6]/10 border border-[#8B5CF6]/20 flex items-center justify-center">
-            <svg className="w-4 h-4 text-[#A78BFA]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <svg className="w-4 h-4 text-[#7C3AED]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
           </div>
-          <h2 className="text-sm font-semibold text-white tracking-wide">Store New Memory</h2>
+          <h2 className="text-sm font-semibold text-foreground tracking-wide">Store New Memory</h2>
         </div>
         <form onSubmit={handleStore} className="space-y-4">
           <div>
@@ -186,14 +186,14 @@ export default function MemoryPage() {
               }}
               rows={3}
               placeholder="e.g. Agent preferences: Database connection string must always use sslmode=verify-full."
-              className="w-full px-4 py-3 rounded-xl text-sm font-medium bg-white/[0.03] border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-[#10B981] transition-colors resize-none"
+              className="w-full px-4 py-3 rounded-xl text-sm font-medium bg-[#E6E0D4] border border-border text-foreground placeholder-muted-foreground/60 focus:outline-none focus:border-[#059669] transition-colors resize-none"
             />
           </div>
 
           {/* Pre-store scan feedback if available */}
           {scanResult && (
             <div className={`p-4 rounded-xl text-xs font-mono border ${
-              scanResult.threat_detected ? "bg-rose-500/10 border-rose-500/20 text-rose-300" : "bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]"
+              scanResult.threat_detected ? "bg-rose-500/10 border-rose-500/20 text-rose-300" : "bg-[#059669]/10 border-[#059669]/20 text-[#059669]"
             }`}>
               <div className="flex items-center justify-between mb-1">
                 <span className="font-bold uppercase tracking-wider">
@@ -202,10 +202,10 @@ export default function MemoryPage() {
                 <span>Risk: {(scanResult.risk_score * 100).toFixed(0)}%</span>
               </div>
               {scanResult.patterns_matched.length > 0 && (
-                <div className="mt-2 space-y-1 text-white/70">
+                <div className="mt-2 space-y-1 text-foreground font-medium">
                   {scanResult.patterns_matched.map((p, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <span className="text-rose-400">[{p.severity}]</span>
+                      <span className="text-rose-600">[{p.severity}]</span>
                       <span>{p.category}: {p.description}</span>
                     </div>
                   ))}
@@ -216,11 +216,11 @@ export default function MemoryPage() {
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <div className="flex items-center gap-2">
-              <label className="text-[10px] font-mono tracking-widest uppercase text-white/40 shrink-0">Memory Type:</label>
+              <label className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground shrink-0">Memory Type:</label>
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value)}
-                className="px-3 py-2 rounded-xl text-xs font-mono font-medium bg-[#121212] border border-white/10 text-white focus:outline-none focus:border-[#10B981]"
+                className="px-3 py-2 rounded-xl text-xs font-mono font-medium bg-[#121212] border border-border text-foreground focus:outline-none focus:border-[#059669]"
               >
                 <option value="episodic">Episodic</option>
                 <option value="semantic">Semantic</option>
@@ -233,14 +233,14 @@ export default function MemoryPage() {
                 type="button"
                 onClick={handleScan}
                 disabled={scanning || !content.trim()}
-                className="px-4 py-2.5 rounded-xl text-xs font-mono font-bold bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="px-4 py-2.5 rounded-xl text-xs font-mono font-bold bg-[#E6E0D4] border border-border text-foreground hover:bg-[#E0D9CC] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {scanning ? "Scanning..." : "Scan for Threat"}
               </button>
               <button
                 type="submit"
                 disabled={loading || !content.trim()}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-[#10B981] text-black hover:bg-[#34D399] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-[#059669] text-black hover:bg-[#10B981] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
@@ -264,9 +264,9 @@ export default function MemoryPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search stored memory content..."
-            className="w-full pl-9 pr-4 py-2.5 rounded-xl text-xs font-medium bg-white/[0.03] border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-[#10B981]"
+            className="w-full pl-9 pr-4 py-2.5 rounded-xl text-xs font-medium bg-[#E6E0D4] border border-border text-foreground placeholder-muted-foreground/60 focus:outline-none focus:border-[#059669]"
           />
-          <svg className="w-4 h-4 text-white/30 absolute left-3 top-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <svg className="w-4 h-4 text-muted-foreground font-medium absolute left-3 top-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
         </div>
@@ -277,8 +277,8 @@ export default function MemoryPage() {
               onClick={() => setFilterType(t)}
               className={`px-3 py-2 rounded-xl text-[10px] font-mono tracking-wider uppercase transition-colors border ${
                 filterType === t
-                  ? "bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30 font-bold"
-                  : "bg-white/[0.02] text-white/40 border-white/5 hover:text-white/70"
+                  ? "bg-[#059669]/15 text-[#059669] border-[#059669]/30 font-bold"
+                  : "bg-[#ECE7DD] text-muted-foreground border-border hover:text-foreground font-medium"
               }`}
             >
               {t === "" ? "All" : t}
@@ -290,8 +290,8 @@ export default function MemoryPage() {
       {/* Error State */}
       {error && (
         <div className="rounded-2xl p-5 border border-rose-500/20 bg-rose-500/10 text-center">
-          <p className="text-xs font-mono text-rose-400 mb-3">{error}</p>
-          <button onClick={() => load(true)} className="px-4 py-1.5 rounded-lg text-xs font-mono font-bold bg-white/5 text-white/70 hover:bg-white/10">
+          <p className="text-xs font-mono text-rose-600 mb-3">{error}</p>
+          <button onClick={() => load(true)} className="px-4 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#E6E0D4] text-foreground font-medium hover:bg-[#E0D9CC]">
             Retry
           </button>
         </div>
@@ -301,23 +301,23 @@ export default function MemoryPage() {
       {fetching && (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-20 rounded-xl bg-white/[0.03] animate-pulse" />
+            <div key={i} className="h-20 rounded-xl bg-[#E6E0D4] animate-pulse" />
           ))}
         </div>
       )}
 
       {/* Empty State */}
       {!fetching && !error && filtered.length === 0 && (
-        <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-12 text-center">
-          <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-center mx-auto mb-4 text-white/30">
+        <div className="panel-card p-12 text-center">
+          <div className="w-12 h-12 rounded-xl bg-[#E6E0D4] border border-border flex items-center justify-center mx-auto mb-4 text-muted-foreground font-medium">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
             </svg>
           </div>
-          <p className="text-sm font-semibold text-white/80">
+          <p className="text-sm font-semibold text-foreground">
             {search || filterType ? "No matching memories found" : "No memories stored yet"}
           </p>
-          <p className="text-xs text-white/40 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             {search || filterType ? "Try adjusting your filter or search query." : "Store your first memory entry above to establish the hash chain."}
           </p>
         </div>
@@ -330,9 +330,9 @@ export default function MemoryPage() {
           return (
             <div
               key={m.memory_id}
-              className="rounded-xl border border-white/5 bg-white/[0.02] p-4 transition-all hover:bg-white/[0.04] hover:border-white/10"
+              className="panel-card p-4"
             >
-              <p className="text-sm text-white/90 leading-relaxed font-medium">{m.content}</p>
+              <p className="text-sm text-foreground leading-relaxed font-medium">{m.content}</p>
               <div className="flex items-center gap-3 mt-3 flex-wrap">
                 <span
                   className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider uppercase"
@@ -341,11 +341,11 @@ export default function MemoryPage() {
                   {style.label}
                 </span>
                 {m.entry_hash && (
-                  <span className="text-[10px] font-mono text-white/30 truncate" title={`SHA-256: ${m.entry_hash}`}>
+                  <span className="text-[10px] font-mono text-muted-foreground font-medium truncate" title={`SHA-256: ${m.entry_hash}`}>
                     {m.entry_hash.slice(0, 10)}…{m.entry_hash.slice(-6)}
                   </span>
                 )}
-                <span className="text-[10px] font-mono text-white/30">
+                <span className="text-[10px] font-mono text-muted-foreground font-medium">
                   {new Date(m.created_at).toLocaleDateString()} {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
@@ -358,7 +358,7 @@ export default function MemoryPage() {
         <div className="flex justify-center pt-2">
           <button
             onClick={() => load(false)}
-            className="px-4 py-2 rounded-xl text-xs font-mono font-bold border border-white/10 bg-white/[0.02] text-white/70 hover:bg-white/5 transition-colors"
+            className="px-4 py-2 rounded-xl text-xs font-mono font-bold border border-border bg-[#ECE7DD] text-foreground font-medium hover:bg-[#E6E0D4] transition-colors"
           >
             Load More ({memories.length} loaded)
           </button>

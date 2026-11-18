@@ -182,7 +182,7 @@ export function StatCard({
           </span>
         ) : null}
       </div>
-      <p className="ds-stat mt-4">{value}</p>
+      <div className="ds-stat mt-4">{value}</div>
       {sublabel ? <div className="ds-meta mt-2">{sublabel}</div> : null}
     </div>
   );
