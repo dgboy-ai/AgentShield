@@ -6,6 +6,21 @@ import { OwnerSidebar } from "@/components/owner-sidebar";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const STORAGE_KEY = "agentshield_owner_token";
+const COOKIE_KEY = "owner_token";
+const COOKIE_MAX_AGE = 60 * 60; // 60min — mirrors OWNER_JWT_EXPIRE_MINUTES
+
+function setOwnerCookie(token: string) {
+  try {
+    const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${COOKIE_KEY}=${encodeURIComponent(token)}; Path=/; Max-Age=${COOKIE_MAX_AGE}; SameSite=Lax${secure}`;
+  } catch {}
+}
+
+function clearOwnerCookie() {
+  try {
+    document.cookie = `${COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
+  } catch {}
+}
 
 interface OwnerAuthContextType { authenticated: boolean; token: string | null; login: (p:string)=>Promise<{ok:boolean; error?:string}>; logout: ()=>void; loading: boolean; }
 const OwnerAuthContext = createContext<OwnerAuthContextType>({ authenticated:false, token:null, login: async()=>({ok:false}), logout:()=>{}, loading:true });
@@ -17,14 +32,14 @@ export function OwnerAuthProvider({ children }: { children: React.ReactNode }){
   useEffect(()=>{
     try{
       const t=sessionStorage.getItem(STORAGE_KEY);
-      if(t){ setToken(t); }
+      if(t){ setToken(t); setOwnerCookie(t); }
     }catch{} finally{ setLoading(false); }
   },[]);
   // validate token on mount by probing stats
   useEffect(()=>{
     if(!token) return;
     fetch(`${API_BASE}/api/owner/stats`,{ headers:{ Authorization:`Bearer ${token}` }})
-      .then(r=>{ if(!r.ok) { sessionStorage.removeItem(STORAGE_KEY); setToken(null);} })
+      .then(r=>{ if(!r.ok) { try{sessionStorage.removeItem(STORAGE_KEY);}catch{} clearOwnerCookie(); setToken(null);} })
       .catch(()=>{});
   },[token]);
 
@@ -32,49 +47,68 @@ export function OwnerAuthProvider({ children }: { children: React.ReactNode }){
     try{
       const r=await fetch(`${API_BASE}/api/owner/verify`,{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ password }) });
       if(!r.ok){
-        if(r.status===429) return {ok:false, error:"Rate-limited — try again in 60s"};
-        if(r.status===403) return {ok:false, error:"INVALID PASSWORD — use DivyanshAI@11 (capital D)"};
+        if(r.status===429) return {ok:false, error:"Too many attempts — try again in 60 seconds"};
+        if(r.status===403 || r.status===401) return {ok:false, error:"Invalid owner password"};
         return {ok:false, error:`Server error ${r.status}`};
       }
       const data=await r.json();
       const t=data.token as string;
-      sessionStorage.setItem(STORAGE_KEY,t);
+      try{ sessionStorage.setItem(STORAGE_KEY,t); }catch{}
+      setOwnerCookie(t);
       setToken(t);
       return {ok:true};
     }catch{
       return {ok:false, error:"Backend not reachable — is FastAPI running on :8000?"};
     }
   };
-  const logout = ()=>{ try{sessionStorage.removeItem(STORAGE_KEY);}catch{} setToken(null); };
+  const logout = ()=>{ try{sessionStorage.removeItem(STORAGE_KEY);}catch{} clearOwnerCookie(); setToken(null); };
   return <OwnerAuthContext.Provider value={{authenticated: !!token, token, login, logout, loading}}>{children}</OwnerAuthContext.Provider>;
 }
 
 export default function OwnerLayout({ children }: { children: React.ReactNode }){
-  const { authenticated, loading } = useOwnerAuth();
+  const { authenticated, loading, logout } = useOwnerAuth();
+  const [navOpen,setNavOpen]=useState(false);
+  useEffect(()=>{
+    if(!navOpen) return;
+    const onKey=(e:KeyboardEvent)=>{ if(e.key==="Escape") setNavOpen(false); };
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[navOpen]);
   if(loading){
     return <div className="owner-root min-h-screen flex items-center justify-center" style={{background:'var(--canvas-bg)'}} suppressHydrationWarning><div className="skeleton" style={{width:160,height:12}} suppressHydrationWarning /></div>;
   }
   if(!authenticated) return <OwnerLoginPage/>;
   return (
-    <div className="owner-root" suppressHydrationWarning>
+    <div className={`owner-root${navOpen ? " nav-open" : ""}`} suppressHydrationWarning>
       <div className="owner-layout" suppressHydrationWarning>
         <OwnerSidebar/>
+        {navOpen && <div className="owner-scrim" onClick={()=>setNavOpen(false)} aria-hidden="true" />}
         <div className="owner-viewport" suppressHydrationWarning>
           <header className="owner-header">
             <div style={{display:'flex',alignItems:'center',gap:10, flexWrap:'wrap'}}>
+              <button
+                type="button"
+                className="owner-hamburger"
+                aria-label={navOpen ? "Close owner navigation" : "Open owner navigation"}
+                aria-expanded={navOpen}
+                onClick={()=>setNavOpen(o=>!o)}
+              >
+                <span aria-hidden="true">{navOpen ? "✕" : "☰"}</span>
+              </button>
               <span className="glow-badge" style={{fontSize:11,fontWeight:900,fontFamily:'var(--font-sg)', color:'#fff', background:'linear-gradient(135deg,#7c3aed,#4f46e5)', padding:'5px 12px', borderRadius:6, textTransform:'uppercase', letterSpacing:0.5, display:'inline-block'}}>Owner Cockpit</span>
               <span style={{fontSize:11,fontWeight:800, color:'#374151', fontFamily:'var(--font-mono)', background:'#f3f4f6', border:'1.5px solid #000', padding:'3px 8px', borderRadius:4}}>AgentShield • Private</span>
-              <span style={{display:'flex',alignItems:'center',gap:8, background:'#f0fdf4', border:'1.5px solid #16a34a', borderRadius:4, padding:'3px 8px'}}>
-                <span style={{width:7,height:7, background:'#16a34a', borderRadius:999, display:'inline-block'}}/>
-                <span style={{fontSize:11,fontWeight:800,color:'#166534', fontFamily:'var(--font-mono)'}}>Live</span>
+              <span className="live-pill">
+                <span className="live-dot" aria-hidden="true"/>
+                <span>Live</span>
               </span>
             </div>
             <div style={{display:'flex',alignItems:'center',gap:10}}>
               <span className="badge badge-yellow">OWNER ONLY</span>
-              <span style={{fontFamily:'var(--font-mono)',fontSize:10,fontWeight:800, color:'#57534e'}}> /owner • JWT</span>
+              <span className="owner-jwt-hint"> /owner • JWT</span>
+              <button type="button" onClick={()=>{ logout(); setNavOpen(false); }} className="btn btn-outline owner-lock-btn">Lock</button>
             </div>
           </header>
-          <main className="owner-page">{children}</main>
+          <main className="owner-page" onClick={()=>{ if(navOpen) setNavOpen(false); }}>{children}</main>
         </div>
       </div>
     </div>
@@ -86,29 +120,41 @@ function OwnerLoginPage(){
   const [password,setPassword]=useState("");
   const [error,setError]=useState("");
   const [submitting,setSubmitting]=useState(false);
-  const handleSubmit = async (e:React.FormEvent)=>{ e.preventDefault(); setSubmitting(true); setError(""); const res=await login(password); if(!res.ok){ setError(res.error||"Invalid password"); setSubmitting(false);} };
+  const handleSubmit = async (e:React.FormEvent)=>{ e.preventDefault(); if(submitting || !password) return; setSubmitting(true); setError(""); const res=await login(password); if(!res.ok){ setError(res.error||"Invalid owner password"); setSubmitting(false); setPassword(""); } };
   return (
-    <div className="owner-root min-h-screen flex items-center justify-center" style={{background:'var(--canvas-bg)', padding:24}} suppressHydrationWarning>
-      <div className="panel" style={{width:'100%', maxWidth:420, padding:28}}>
+    <div className="owner-root min-h-screen flex items-center justify-center owner-login-wrap" suppressHydrationWarning>
+      <div className="panel owner-login-card">
         <div className="eyebrow">Owner Access • Private URL</div>
-        <div style={{display:'flex',alignItems:'center',gap:14, marginTop:12, marginBottom:8}}>
-          <div style={{width:44,height:44, border:'3px solid #000', borderRadius:4, background:'#000', display:'flex',alignItems:'center',justifyContent:'center', boxShadow:'2px 2px 0 #000'}}>
-            <span style={{fontWeight:900,color:'#facc15', fontFamily:'var(--font-sg)'}}>AS</span>
+        <div className="owner-login-head">
+          <div className="owner-login-mark" aria-hidden="true">
+            <span>AS</span>
           </div>
           <div>
-            <div className="welcome-title" style={{fontSize:20, marginBottom:2}}>AgentShield Owner</div>
-            <div style={{fontFamily:'var(--font-mono)', fontSize:11, fontWeight:800, color:'#57534e', letterSpacing:0.6}}>Bastion-grade • Enhanced</div>
+            <div className="welcome-title owner-login-title">AgentShield Owner</div>
+            <div className="owner-login-sub">Bastion-grade • Enhanced</div>
           </div>
         </div>
-        <p className="welcome-subtitle" style={{marginBottom:18}}>Private cockpit. Password never leaves server — verified via bcrypt + JWT. Token stored in sessionStorage (clears on tab close).</p>
-        <form onSubmit={handleSubmit} style={{display:'flex', flexDirection:'column', gap:12}}>
-          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter owner password" autoFocus
-            style={{background:'#fff', border:'3px solid #000', borderRadius:4, padding:'12px 14px', fontFamily:'var(--font-mono)', fontSize:13, fontWeight:700, boxShadow:'2px 2px 0 #000', outline:'none', width:'100%'}} />
-          {error && <div className="badge badge-red" style={{alignSelf:'flex-start'}}>{error}</div>}
-          <button type="submit" disabled={submitting || !password} className="btn btn-primary" style={{opacity: submitting||!password?0.6:1, width:'100%', justifyContent:'center'}}>
+        <p className="welcome-subtitle owner-login-copy">Private cockpit. Encrypted in transit, bcrypt-verified on the server, short-lived JWT. Token clears on tab close.</p>
+        <form onSubmit={handleSubmit} className="owner-login-form">
+          <label htmlFor="owner-password" className="owner-label">Owner password</label>
+          <input
+            id="owner-password"
+            name="owner-password"
+            type="password"
+            value={password}
+            onChange={e=>setPassword(e.target.value)}
+            placeholder="Enter owner password"
+            autoFocus
+            autoComplete="current-password"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? "owner-login-error" : undefined}
+            className="owner-input"
+          />
+          {error && <div id="owner-login-error" role="alert" aria-live="assertive" className="badge badge-red owner-error">{error}</div>}
+          <button type="submit" disabled={submitting || !password} aria-busy={submitting} className="btn btn-primary owner-submit">
             {submitting ? 'Verifying…' : 'Unlock Cockpit →'}
           </button>
-          <div style={{fontSize:11, fontWeight:700, color:'#78716c', fontFamily:'var(--font-mono)', textAlign:'center'}}>Server-verified • Rate-limited 5/min • JWT 60min</div>
+          <div className="owner-login-meta">Server-verified • Rate-limited 5/min • JWT 60min</div>
         </form>
       </div>
     </div>

@@ -54,15 +54,18 @@ if _has_json_logger:
 app.add_middleware(BodyLimitMiddleware)
 app.add_middleware(RateLimitMiddleware, max_requests=120, window_seconds=60)
 app.add_middleware(RequestIDMiddleware)
-# CORS: allow credentials for httpOnly cookies (refresh flow) while keeping WebMCP wildcard for public routes
-# For credentialed requests, browser requires explicit origin, not "*". We allow localhost and vercel + regex for https.
+# CORS: explicit allowlist only (no open https regex with credentials).
+# Extra origins via CORS_ORIGINS env (comma-separated). Public demo routes stay same-origin; judges use curl, not browser wildcard.
+def _cors_origins() -> list[str]:
+    base = ["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:3000"]
+    extra = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+    return base + extra
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:3000"],
-    allow_origin_regex=r"https://.*",
+    allow_origins=_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 # Routers (unversioned for backward compatibility)

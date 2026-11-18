@@ -67,13 +67,28 @@ export default function CompliancePage() {
     );
   }
 
-  if (!report) return null;
+  if (!report) {
+    return (
+      <div className="glass-card rounded-2xl p-10 text-center">
+        <p className="text-sm font-medium" style={{ color: "#7A7164" }}>No compliance data yet — store a memory or pin a constraint first.</p>
+      </div>
+    );
+  }
+
+  const retention = Number.isFinite(Number(report.retention_years)) ? report.retention_years : "—";
+  const copyId = async () => {
+    try {
+      await navigator.clipboard.writeText(report.report_id);
+    } catch {}
+  };
 
   return (
     <div className="space-y-8 animate-slide-up">
       <div>
-        <h1 className="text-4xl font-black font-display tracking-tight">Compliance</h1>
-        <p className="mt-2 text-base font-medium" style={{ color: "#5A5248" }}>
+        <h1 className="text-4xl sm:text-5xl font-black font-display tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-gray-900 via-gray-800 to-gray-500 drop-shadow-sm pb-1">
+          Compliance
+        </h1>
+        <p className="mt-1 text-base font-medium text-gray-500 tracking-tight">
           EU AI Act Article 12 compliance report
         </p>
       </div>
@@ -98,24 +113,27 @@ export default function CompliancePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        <div className="glass-card rounded-2xl p-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <div className="glass-card rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
           <div className="text-4xl font-black font-display tracking-tight">{report.total_events}</div>
           <div className="text-sm font-bold mt-1" style={{ color: "#5A5248" }}>Total Events</div>
         </div>
-        <div className="glass-card rounded-2xl p-6">
-          <div className="text-4xl font-black font-display tracking-tight">{report.retention_years}yr</div>
+        <div className="glass-card rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
+          <div className="text-4xl font-black font-display tracking-tight">{retention}{retention === "—" ? "" : "yr"}</div>
           <div className="text-sm font-bold mt-1" style={{ color: "#5A5248" }}>Retention</div>
         </div>
-        <div className="glass-card rounded-2xl p-6">
-          <div className="text-[11px] font-mono truncate" style={{ color: "#7A7164" }}>{report.report_id}</div>
-          <div className="text-sm font-bold mt-2" style={{ color: "#5A5248" }}>Report ID</div>
+        <div className="glass-card rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
+          <div className="text-[11px] font-mono truncate" style={{ color: "#7A7164" }} title={report.report_id}>{report.report_id}</div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-sm font-bold" style={{ color: "#5A5248" }}>Report ID</span>
+            <button onClick={copyId} className="text-[11px] font-bold px-2 py-1 rounded-lg transition-all duration-200 hover:-translate-y-px" style={{ background: "rgba(13,124,95,0.08)", color: "#0D7C5F" }}>Copy</button>
+          </div>
         </div>
       </div>
 
       <div className="glass-card rounded-2xl p-6">
         <h2 className="text-xs font-bold tracking-[0.15em] uppercase mb-4" style={{ color: "#7A7164" }}>Hash Chain Integrity</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {Object.entries(report.hash_chain).map(([key, value]) => (
             <div key={key}>
               <div className="text-[11px] font-bold tracking-wider uppercase" style={{ color: "#7A7164" }}>{key}</div>
@@ -141,7 +159,7 @@ export default function CompliancePage() {
 
       <div className="glass-card rounded-2xl p-6">
         <h2 className="text-xs font-bold tracking-[0.15em] uppercase mb-4" style={{ color: "#7A7164" }}>Constraint Summary</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {Object.entries(report.constraint_summary).map(([key, value]) => (
             <div key={key}>
               <div className="text-[11px] font-bold tracking-wider uppercase" style={{ color: "#7A7164" }}>{key}</div>

@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "sonner";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface Memory {
   memory_id: string;
@@ -12,6 +13,7 @@ interface Memory {
   memory_type: string;
   entry_hash: string;
   created_at: string;
+  source_provenance?: string;
 }
 
 const TYPE_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
@@ -79,8 +81,10 @@ export default function MemoryPage() {
   return (
     <div className="space-y-8 animate-slide-up">
       <div>
-        <h1 className="text-4xl font-black font-display tracking-tight">Memory</h1>
-        <p className="mt-2 text-base font-medium" style={{ color: "#5A5248" }}>
+        <h1 className="text-5xl font-black font-display tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-gray-900 via-gray-800 to-gray-500 drop-shadow-sm pb-1">
+          Memory
+        </h1>
+        <p className="mt-1 text-base font-medium text-gray-500 tracking-tight">
           Store memories with SHA-256 hash chain integrity
         </p>
       </div>
@@ -95,24 +99,33 @@ export default function MemoryPage() {
           <h2 className="text-sm font-bold font-display" style={{ color: "#1A1A1A" }}>Store New Memory</h2>
         </div>
         <form onSubmit={handleStore} className="space-y-3">
-          <input
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="e.g. User prefers dark mode and works late nights"
-            className="w-full px-4 py-3 rounded-xl text-sm font-medium transition-all duration-250"
-            style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }}
-          />
-          <div className="flex items-center gap-3">
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              className="px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-250"
+          <div>
+            <label htmlFor="mem-content" className="text-[11px] font-bold tracking-wider uppercase" style={{ color: "#7A7164" }}>Memory content</label>
+            <input
+              id="mem-content"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="e.g. User prefers dark mode and works late nights"
+              autoComplete="off"
+              className="mt-1.5 w-full px-4 py-3 rounded-xl text-sm font-medium transition-all duration-250 outline-none focus:ring-2 focus:ring-primary/40"
               style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }}
-            >
+            />
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div>
+              <label htmlFor="mem-type" className="text-[11px] font-bold tracking-wider uppercase" style={{ color: "#7A7164" }}>Type</label>
+              <select
+                id="mem-type"
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="mt-1.5 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-250 outline-none focus:ring-2 focus:ring-primary/40"
+                style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }}
+              >
               <option value="episodic">Episodic</option>
               <option value="semantic">Semantic</option>
               <option value="procedural">Procedural</option>
-            </select>
+              </select>
+            </div>
             <button
               type="submit"
               disabled={loading || !content.trim()}
@@ -145,10 +158,19 @@ export default function MemoryPage() {
 
       {/* search + filter */}
       <div className="flex items-center gap-3 flex-wrap">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search memories..." className="flex-1 min-w-[200px] px-4 py-2.5 rounded-xl text-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)" }} />
-        <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-3 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)" }}>
-          <option value="">All types</option><option value="episodic">Episodic</option><option value="semantic">Semantic</option><option value="procedural">Procedural</option>
-        </select>
+        <div className="flex-1 min-w-[200px]">
+          <label htmlFor="mem-search" className="sr-only">Search memories</label>
+          <input id="mem-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search loaded memories..." autoComplete="off" className="w-full px-4 py-2.5 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/40" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)" }} />
+        </div>
+        <div>
+          <label htmlFor="mem-filter" className="sr-only">Filter by type</label>
+          <select id="mem-filter" value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-3 py-2.5 rounded-xl text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/40" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)" }}>
+            <option value="">All types</option><option value="episodic">Episodic</option><option value="semantic">Semantic</option><option value="procedural">Procedural</option>
+          </select>
+        </div>
+        {(search || filterType) ? (
+          <span className="text-[11px] font-semibold" style={{ color: "#7A7164" }}>Filtering {memories.length} loaded • load more for full search</span>
+        ) : null}
       </div>
 
       {fetching && (
@@ -171,32 +193,41 @@ export default function MemoryPage() {
         </div>
       )}
 
-      {!fetching && filtered.map((m, i) => {
-        const style = TYPE_STYLES[m.memory_type] || TYPE_STYLES.episodic;
-        return (
-          <div
-            key={m.memory_id}
-            className="glass-card rounded-2xl p-5 animate-slide-up"
-            style={{ animationDelay: `${i * 60}ms` }}
-          >
-            <p className="text-sm font-bold" style={{ color: "#1A1A1A" }}>{m.content}</p>
-            <div className="flex items-center gap-2.5 mt-3">
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold" style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}>
-                {style.label}
-              </span>
-              <span className="text-[11px] font-mono" style={{ color: "#7A7164" }}>
-                {m.entry_hash?.slice(0, 16)}...
-              </span>
-              <span className="text-[11px]" style={{ color: "#7A7164" }}>
-                {new Date(m.created_at).toLocaleDateString()}
-              </span>
-            </div>
-          </div>
-        );
-      })}
-      {!fetching && hasMore && filtered.length > 0 && (
+      <AnimatePresence>
+        {!fetching && filtered.map((m, i) => {
+          const style = TYPE_STYLES[m.memory_type] || TYPE_STYLES.episodic;
+          return (
+            <motion.div
+              layout
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2, delay: i * 0.05 }}
+              key={m.memory_id}
+              className="glass-card rounded-2xl p-5"
+            >
+              <p className="text-sm font-bold" style={{ color: "#1A1A1A" }}>{m.content}</p>
+              <div className="flex items-center gap-2.5 mt-3 flex-wrap">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold shadow-sm" style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}>
+                  {style.label}
+                </span>
+                <span className="text-[11px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200 shadow-sm">
+                  Agent: {m.source_provenance || "direct"}
+                </span>
+                <span className="text-[11px] font-mono bg-gray-100/50 px-2 py-0.5 rounded-md border border-gray-200/50" style={{ color: "#7A7164" }}>
+                  {m.entry_hash?.slice(0, 16)}...
+                </span>
+                <span className="text-[11px]" style={{ color: "#7A7164" }}>
+                  {new Date(m.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
+      {!fetching && hasMore && (
         <div className="flex justify-center">
-          <button onClick={() => load(false)} className="px-5 py-2.5 rounded-xl text-xs font-bold" style={{ background: "rgba(13,124,95,0.08)", color: "#0D7C5F" }}>Load More ({memories.length} loaded)</button>
+          <button onClick={() => load(false)} className="px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md" style={{ background: "rgba(13,124,95,0.08)", color: "#0D7C5F" }}>Load More ({memories.length} loaded)</button>
         </div>
       )}
     </div>

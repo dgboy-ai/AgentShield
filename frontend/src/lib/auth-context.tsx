@@ -93,10 +93,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api.refresh();
       setState((s) => {
-        if (!s.token) return s;
-        const ns = { ...s, token: res.access_token, userId: res.user_id, orgId: res.org_id };
-        localStorage.setItem("agentshield_auth", JSON.stringify({ ...ns, loading: false }));
-        return { ...ns, loading: false };
+        const ns = {
+          token: res.access_token,
+          userId: res.user_id,
+          orgId: res.org_id,
+          email: s.email,
+          loading: false,
+        };
+        try {
+          localStorage.setItem("agentshield_auth", JSON.stringify(ns));
+        } catch {}
+        return ns;
       });
       return true;
     } catch {
@@ -109,7 +116,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await api.logout();
     } catch {}
     setState({ token: null, userId: null, orgId: null, email: null, loading: false });
-    localStorage.removeItem("agentshield_auth");
+    try {
+      localStorage.removeItem("agentshield_auth");
+      localStorage.removeItem("agentshield_db_engine");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== "agentshield_auth") return;
+      try {
+        if (!e.newValue) {
+          setState({ token: null, userId: null, orgId: null, email: null, loading: false });
+          return;
+        }
+        const parsed = JSON.parse(e.newValue) as AuthState;
+        setState({ ...parsed, loading: false });
+      } catch {}
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   return (

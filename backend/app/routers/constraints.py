@@ -405,8 +405,8 @@ def update_constraint(
         sr = signing_engine.sign_json(sign_payload_upd)
         new_sig = sr.signature if sr.success else None
 
-    # Update database
-    db_constraint = db.query(ConstraintDB).filter(ConstraintDB.constraint_id == constraint_id).first()
+    # Update database (org-scoped to prevent cross-tenant write)
+    db_constraint = db.query(ConstraintDB).filter(ConstraintDB.constraint_id == constraint_id, ConstraintDB.org_id == current_user.org_id).first()
     if db_constraint:
         if data.text:
             db_constraint.constraint_text = data.text
@@ -457,8 +457,8 @@ def delete_constraint(
     # Deactivate via engine
     pinning_engine.deactivate(constraint_id)
 
-    # Update database
-    db_constraint = db.query(ConstraintDB).filter(ConstraintDB.constraint_id == constraint_id).first()
+    # Update database (org-scoped to prevent cross-tenant write)
+    db_constraint = db.query(ConstraintDB).filter(ConstraintDB.constraint_id == constraint_id, ConstraintDB.org_id == current_user.org_id).first()
     if db_constraint:
         db_constraint.is_active = False
         db.commit()

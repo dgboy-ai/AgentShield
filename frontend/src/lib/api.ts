@@ -1,6 +1,19 @@
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined" ? window.location.origin.replace(":3000", ":8000") : "http://localhost:8000");
+function resolveApiBase(): string {
+  const env = (process.env.NEXT_PUBLIC_API_URL || "").trim().replace(/\/+$/, "");
+  if (env) return env;
+  if (typeof window !== "undefined") {
+    try {
+      const u = new URL(window.location.origin);
+      if (u.port === "3000") u.port = "8000";
+      return u.toString().replace(/\/+$/, "");
+    } catch {}
+  }
+  return "http://localhost:8000";
+}
+
+const API_BASE = resolveApiBase();
+const REQUEST_TIMEOUT_MS = 20000;
+let refreshInflight: Promise<unknown> | null = null;
 
 interface ApiOptions {
   method?: string;
@@ -20,63 +33,90 @@ export class ApiError extends Error {
   }
 }
 
+async function parseBody(res: Response): Promise<unknown> {
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  const text = await res.text();
+  if (!text) return null;
+  if (ct.includes("json") || ct.includes("jsonl") || text.trimStart().startsWith("{") || text.trimStart().startsWith("[")) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+  // JSONL / text export — return raw string
+  return text;
+}
+
+async function doFetch(path: string, opts: ApiOptions, headers: Record<string, string>, signal: AbortSignal): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    method: opts.method || "GET",
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    credentials: "include",
+    signal,
+  });
+}
+
 async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
-  let res = await fetch(`${API_BASE}${path}`, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-    credentials: "include", // for httpOnly refresh/access cookies
-  });
-
-  // 5.2: Handle 401 with httpOnly refresh (XSS mitigation)
-  if (res.status === 401 && !path.includes("/auth/refresh") && !path.includes("/auth/login") && !path.includes("/auth/register")) {
-    try {
-      const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        // Update localStorage with new access token if present
-        try {
-          const saved = localStorage.getItem("agentshield_auth");
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            parsed.token = refreshData.access_token;
-            localStorage.setItem("agentshield_auth", JSON.stringify(parsed));
-            // Retry original request with new token
-            if (refreshData.access_token) headers["Authorization"] = `Bearer ${refreshData.access_token}`;
-            res = await fetch(`${API_BASE}${path}`, {
-              method: opts.method || "GET",
-              headers,
-              body: opts.body ? JSON.stringify(opts.body) : undefined,
-              credentials: "include",
-            });
-            if (res.ok) {
-              if (res.status === 204) return undefined as T;
-              return res.json();
-            }
-          }
-        } catch {}
-      }
-    } catch {}
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await doFetch(path, opts, headers, ctrl.signal);
+  } catch (e) {
+    clearTimeout(timer);
+    throw new ApiError(e instanceof DOMException && e.name === "AbortError" ? "Request timed out" : "Network unreachable", 0, e);
   }
 
-  if (!res.ok) {
-    let detail: unknown;
+  // Single-flight 401 refresh — avoids N concurrent refresh storms
+  if (res.status === 401 && !path.includes("/auth/refresh") && !path.includes("/auth/login") && !path.includes("/auth/register")) {
     try {
-      detail = await res.json();
-    } catch {
-      detail = await res.text();
-    }
-    const msg = typeof detail === "object" && detail !== null && "detail" in detail
-      ? String((detail as Record<string, unknown>).detail)
-      : res.statusText;
+      if (!refreshInflight) {
+        refreshInflight = (async () => {
+          const r = await fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" });
+          if (!r.ok) throw new Error(`refresh ${r.status}`);
+          return parseBody(r);
+        })().finally(() => {
+          refreshInflight = null;
+        });
+      }
+      const refreshData = (await refreshInflight) as Record<string, unknown>;
+      const nextToken = typeof refreshData?.access_token === "string" ? (refreshData.access_token as string) : null;
+      try {
+        const saved = localStorage.getItem("agentshield_auth");
+        if (saved && nextToken) {
+          const parsed = JSON.parse(saved) as Record<string, unknown>;
+          parsed.token = nextToken;
+          localStorage.setItem("agentshield_auth", JSON.stringify(parsed));
+        }
+      } catch {}
+      if (nextToken) headers["Authorization"] = `Bearer ${nextToken}`;
+      res = await doFetch(path, opts, headers, ctrl.signal);
+    } catch {}
+  }
+  clearTimeout(timer);
+
+  if (!res.ok) {
+    const detail = await parseBody(res).catch(() => null);
+    const msg =
+      typeof detail === "object" && detail !== null && "detail" in detail
+        ? String((detail as Record<string, unknown>).detail)
+        : typeof detail === "string" && detail
+          ? detail.slice(0, 300)
+          : res.statusText || `Request failed (${res.status})`;
     throw new ApiError(msg, res.status, detail);
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+  // Export endpoints may return raw JSONL text
+  if (path.includes("/export/")) {
+    return (await parseBody(res)) as T;
+  }
+  return (await parseBody(res)) as T;
 }
 
 export const api = {
@@ -167,7 +207,7 @@ export const api = {
   auditTimeTravel: (token: string, timestamp: string) =>
     request<Record<string, unknown>>(`/api/audit/time-travel?timestamp=${encodeURIComponent(timestamp)}`, { token }),
   auditDbTimeTravel: (token: string, timestamp: string, table: string = "audit_log") =>
-    request<Record<string, unknown>>(`/api/audit/db-time-travel?timestamp=${encodeURIComponent(timestamp)}&table=${table}`, { token }),
+    request<Record<string, unknown>>(`/api/audit/db-time-travel?timestamp=${encodeURIComponent(timestamp)}&table=${encodeURIComponent(table)}`, { token }),
   complianceReport: (token: string) =>
     request<Record<string, unknown>>("/api/audit/compliance/report", { token }),
   exportJsonl: (token: string) =>

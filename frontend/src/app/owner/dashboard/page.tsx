@@ -1,5 +1,6 @@
 "use client";
 export const dynamic = 'force-dynamic';
+import Link from "next/link";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useOwnerAuth } from "../layout";
 
@@ -49,40 +50,52 @@ export default function OwnerDashboardPage(){
     }catch(e){ setError(e instanceof Error? e.message:"Failed to load"); } finally{ setLoading(false); }
   },[token]);
 
-  // real-time: what orgs do — SSE stream replaces blind polling
+  // real-time — cookie-auth SSE (no token in URL), polling fallback with backoff
   useEffect(()=>{
     if(!token) return;
     fetchData();
-    // SSE with token via query param (EventSource can't set header)
-    const url=`${API_BASE}/api/owner/stream?token=${encodeURIComponent(token)}`;
-    const es=new EventSource(url);
-    esRef.current=es;
-    es.onmessage=(e)=>{
-      try{
-        const d=JSON.parse(e.data);
-        if(d.ts){ setLiveTick(d.ts); setLiveEntries(d.total_entries ?? 0); }
-        // also bump stats live without full fetch
-        if(d.total_sessions!=null && stats){
-          setStats(s=> s ? {...s, organizations:{total:d.total_sessions}} : s);
-        }
-      }catch{}
-    };
-    es.onerror=()=>{ es.close(); };
-    // fallback poll every 10s if SSE drops
-    const id=setInterval(()=>{ if(es.readyState===2) fetchData(); },10000);
-    return ()=>{ es.close(); clearInterval(id); };
+    // Backend accepts `owner_token` cookie (see /api/owner/stream). Cookie is
+    // mirrored on login in ../layout so EventSource sends it via withCredentials.
+    let es: EventSource | null = null;
+    let closed = false;
+    let failures = 0;
+    try{
+      es = new EventSource(`${API_BASE}/api/owner/stream`, { withCredentials: true } as EventSourceInit);
+      esRef.current = es;
+      es.onmessage=(e)=>{
+        try{
+          const d=JSON.parse(e.data);
+          failures = 0;
+          if(d.ts){ setLiveTick(d.ts); setLiveEntries(d.total_entries ?? 0); }
+          // bump org count live without full fetch (functional update, no stale closure)
+          if(d.total_sessions!=null){
+            setStats(s=> s ? {...s, organizations:{total:d.total_sessions}} : s);
+          }
+        }catch{}
+      };
+      es.onerror=()=>{
+        failures += 1;
+        // Close broken stream; fallback poller below keeps data fresh.
+        // Backoff: stop hammering after repeated failures, rely on interval.
+        try{ es?.close(); }catch{}
+        if(failures > 3){ try{ esRef.current?.close(); }catch{} esRef.current = null; }
+      };
+    }catch{}
+    // fallback poll every 10s if SSE drops/closed
+    const id=setInterval(()=>{ if(closed) return; if(!esRef.current || (esRef.current as EventSource).readyState===2) fetchData(); },10000);
+    return ()=>{ closed = true; try{ es?.close(); }catch{} esRef.current = null; clearInterval(id); };
   },[token, fetchData]);
 
   if(loading && !stats){
-    return <div className="stagger" style={{display:'grid', gap:16}}>
+    return <div className="stagger owner-loading">
       <div className="skeleton" style={{height:28, width:260}}/>
-      <div style={{display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14}}>
+      <div className="kpi-grid">
         {[1,2,3,4].map(i=><div key={i} className="skeleton" style={{height:110}}/>)}
       </div>
     </div>;
   }
   if(error){
-    return <div className="panel" style={{padding:24}}><div className="badge badge-red">{error}</div><div style={{marginTop:12}}><button onClick={fetchData} className="btn btn-outline">Retry</button></div></div>;
+    return <div className="panel owner-error-panel"><div className="badge badge-red" role="alert">{error}</div><div className="owner-error-actions"><button onClick={fetchData} className="btn btn-outline">Retry</button></div></div>;
   }
 
   const chainValid = chain?.hash_chain.is_valid ?? true;
@@ -98,43 +111,43 @@ export default function OwnerDashboardPage(){
 
   return (
     <div className="stagger" style={{display:'flex', flexDirection:'column', gap:18}}>
-      <div className="welcome-section" style={{marginBottom:0}}>
+      <div className="welcome-section owner-welcome">
         <div className="eyebrow">Owner Cockpit • Session-wise • Real-time SSE</div>
         <div className="welcome-title">AgentShield — Live System Cockpit</div>
         <p className="welcome-subtitle">
-          Real product = <b>per-org isolation</b> like Bastion/CRDB: each org owns its hash chain (multi-tenant). Session-wise ledger below shows every org's chain + live SSE
-          <span style={{marginLeft:6, display:'inline-flex', alignItems:'center', gap:6, background: liveTick?'#f0fdf4':'#f4f3ef', border:'1.5px solid #000', borderRadius:4, padding:'2px 8px', fontFamily:'var(--font-mono)', fontSize:10, fontWeight:800}}>
-            <span style={{width:6,height:6, background: liveTick?'#10b981':'#a8a29e', borderRadius:999, display:'inline-block', animation: liveTick?'pulse 1.5s infinite':undefined}}/> {liveTick ? new Date(liveTick).toLocaleTimeString() : 'connecting…'} • {liveEntries} entries live
+          Real product = <b>per-org isolation</b> like Bastion/CRDB: each org owns its hash chain (multi-tenant). Session-wise ledger below shows every org&apos;s chain + live SSE
+          <span className={`live-pill${liveTick ? " is-live" : ""}`} aria-live="polite">
+            <span className={`live-dot${liveTick ? " is-live" : ""}`} aria-hidden="true"/> {liveTick ? new Date(liveTick).toLocaleTimeString() : 'connecting…'} • {liveEntries} entries live
           </span>
         </p>
       </div>
 
-      <div style={{display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14}}>
+      <div className="kpi-grid">
         {kpis.map(k=>(
-          <div key={k.label} className="kpi-card">
-            <div style={{display:'flex', alignItems:'center', gap:8}}>
+          <div key={k.label} className="kpi-card kpi-hover" tabIndex={0}>
+            <div className="kpi-head">
               <span className="chain-dot" style={{width:10,height:10, borderRadius:999, background:k.accent, border:'2px solid #000', display:'inline-block'}}/>
-              <span style={{fontFamily:'var(--font-mono)', fontSize:10, fontWeight:800, letterSpacing:1, textTransform:'uppercase'}}>{k.label}</span>
+              <span className="kpi-label">{k.label}</span>
             </div>
-            <div style={{fontFamily:'var(--font-sg)', fontSize:28, fontWeight:900, letterSpacing:-0.03+'em', color:'#000'}}>{k.value}</div>
-            <div style={{fontSize:11, fontWeight:700, color:'#57534e', fontFamily:'var(--font-mono)'}}>{k.sub}</div>
+            <div className="kpi-value">{k.value}</div>
+            <div className="kpi-sub">{k.sub}</div>
           </div>
         ))}
       </div>
 
-      <div style={{display:'grid', gridTemplateColumns:'1.2fr 0.8fr', gap:14}}>
+      <div className="snapshot-grid">
         <div className="bento-panel">
           <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14}}>
             <div style={{display:'flex', alignItems:'center', gap:8}}><span style={{width:8,height:8, background:'#000', borderRadius:999, display:'inline-block'}}/><span style={{fontFamily:'var(--font-mono)', fontSize:11, fontWeight:800, letterSpacing:1}}>SYSTEM SNAPSHOT • REAL</span></div>
             <span className="badge badge-yellow">Live • {stats?.database.engine ?? 'unknown'} • SSE</span>
           </div>
-          <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12}}>
+          <div className="bento-kpis">
             {[
               {k:"Orgs (sessions)", v: stats?.organizations.total ?? sessions.length, sub:"tenants"},
               {k:"Patterns", v: stats?.patterns.total_patterns ?? 0, sub:"OWASP ASI06"},
-              {k:"Categories", v: stats?.patterns.total_categories ?? 0, sub:"6 expected"},
+              {k:"Categories", v: stats?.patterns.total_categories ?? 0, sub:"live count"},
             ].map(s=>(
-              <div key={s.k} className="bento-kpi" style={{padding:'14px'}}>
+              <div key={s.k} className="bento-kpi" tabIndex={0}>
                 <div style={{fontFamily:'var(--font-mono)', fontSize:10, fontWeight:800, letterSpacing:1, color:'#57534e'}}>{s.k}</div>
                 <div style={{fontFamily:'var(--font-sg)', fontSize:22, fontWeight:900, color:'#000'}}>{s.v}</div>
                 <div style={{fontSize:10, color:'#78716c', fontWeight:700, fontFamily:'var(--font-mono)'}}>{s.sub}</div>
@@ -171,7 +184,7 @@ export default function OwnerDashboardPage(){
             <span className={`badge ${auditValid ? 'badge-green' : 'badge-red'}`}>Audit {auditValid ? 'OK' : 'FAIL'}: {chain?.audit_chain.total_entries ?? 0}</span>
             <span className="badge badge-yellow">Real-time</span>
           </div>
-          <a href="/owner/dashboard/health" className="btn btn-outline" style={{marginTop:12, width:'100%', justifyContent:'center'}}>Open Health →</a>
+          <Link href="/owner/dashboard/health" className="btn btn-outline owner-health-link">Open Health →</Link>
         </div>
       </div>
 

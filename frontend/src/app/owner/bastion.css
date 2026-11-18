@@ -171,6 +171,129 @@
 @media (max-width: 900px) {
   .owner-root .owner-sidebar { position: fixed; left:0; top:0; bottom:0; transform: translateX(-100%); transition: transform 0.3s var(--ease-out); }
   .owner-root .owner-sidebar.open { transform: translateX(0); }
+  .owner-root.nav-open .owner-sidebar { transform: translateX(0); box-shadow: var(--shadow-lg); }
   .owner-root .owner-page { padding: 20px; }
   .owner-root .owner-header { padding: 12px 16px; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * 1ST-ORDER HARDENING POLISH — responsive grids, login, live SSE
+ * Beautiful hover / focus / motion, mobile-first
+ * ───────────────────────────────────────────────────────────── */
+@keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.82); } }
+
+.owner-root .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.owner-root .snapshot-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 14px; }
+.owner-root .bento-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.owner-root .owner-loading { display: grid; gap: 16px; }
+.owner-root .kpi-head { display: flex; align-items: center; gap: 8px; }
+.owner-root .kpi-label { font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+.owner-root .kpi-value { font-family: var(--font-sg); font-size: 28px; font-weight: 900; letter-spacing: -0.03em; color: #000; line-height: 1.1; }
+.owner-root .kpi-sub { font-size: 11px; font-weight: 700; color: var(--mute); font-family: var(--font-mono); }
+.owner-root .owner-welcome { margin-bottom: 0; }
+.owner-root .owner-error-panel { padding: 24px; }
+.owner-root .owner-error-actions { margin-top: 12px; }
+.owner-root .owner-health-link { margin-top: 12px; width: 100%; justify-content: center; }
+
+/* Beautiful hover: lift + hard-shadow grow + subtle sheen */
+.owner-root .kpi-hover, .owner-root .bento-kpi, .owner-root .bento-panel, .owner-root .panel { position: relative; }
+.owner-root .kpi-hover::after, .owner-root .bento-kpi::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0;
+  background: linear-gradient(120deg, transparent 30%, rgba(250,204,21,0.16) 50%, transparent 70%);
+  background-size: 220% 100%; transition: opacity 0.25s var(--ease-out);
+}
+.owner-root .kpi-hover:hover::after, .owner-root .bento-kpi:hover::after { opacity: 1; animation: shimmer 1.6s ease-in-out infinite; }
+.owner-root .kpi-hover:hover { transform: translate(-2px,-2px); box-shadow: var(--shadow-md); border-color: #000; }
+.owner-root .kpi-hover:focus-visible, .owner-root .bento-kpi:focus-visible,
+.owner-root .btn:focus-visible, .owner-root .owner-link:focus-visible,
+.owner-root .owner-input:focus-visible, .owner-root .owner-hamburger:focus-visible {
+  outline: 3px solid rgba(124,58,237,0.55); outline-offset: 2px;
+}
+
+/* Live SSE pill */
+.owner-root .live-pill {
+  margin-left: 6px; display: inline-flex; align-items: center; gap: 6px;
+  background: #f4f3ef; border: 1.5px solid #000; border-radius: 4px; padding: 2px 8px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 800;
+  box-shadow: 1px 1px 0 #000; transition: background 0.25s var(--ease-out), box-shadow 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+}
+.owner-root .live-pill.is-live { background: #f0fdf4; }
+.owner-root .live-pill:hover { transform: translate(-1px,-1px); box-shadow: 2px 2px 0 #000; }
+.owner-root .live-dot { width: 6px; height: 6px; background: #a8a29e; border-radius: 999px; display: inline-block; }
+.owner-root .live-dot.is-live { background: #10b981; animation: pulse 1.5s infinite; }
+
+/* Header bits */
+.owner-root .owner-jwt-hint { font-family: var(--font-mono); font-size: 10px; font-weight: 800; color: var(--mute); }
+.owner-root .owner-lock-btn { padding: 6px 12px; font-size: 11px; }
+.owner-root .owner-lock-btn:hover { background: #fef2f2; transform: translate(-1px,-1px); box-shadow: 4px 4px 0 0 #000; }
+.owner-root .owner-hamburger {
+  display: none; width: 38px; height: 38px; border: 2px solid #000; border-radius: 6px;
+  background: #fff; box-shadow: var(--shadow-sm); font-size: 16px; font-weight: 900; line-height: 1;
+  cursor: pointer; transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out), background 0.15s var(--ease-out);
+}
+.owner-root .owner-hamburger:hover { background: var(--accent-breeze); transform: translate(-1px,-1px); box-shadow: 3px 3px 0 #000; }
+.owner-root .owner-hamburger:active { transform: translate(1px,1px); box-shadow: 0 0 0 #000; }
+.owner-root .owner-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.35); backdrop-filter: blur(2px); z-index: 40; animation: fadeIn 0.2s var(--ease-out); }
+
+/* Login — beautiful, responsive, accessible */
+.owner-root.owner-login-wrap { background: var(--canvas-bg); padding: 24px; }
+.owner-root .owner-login-card { width: 100%; max-width: 420px; padding: 28px; }
+.owner-root .owner-login-card:hover { transform: translate(-2px,-2px); box-shadow: 6px 6px 0 0 #000; }
+.owner-root .owner-login-head { display: flex; align-items: center; gap: 14px; margin-top: 12px; margin-bottom: 8px; }
+.owner-root .owner-login-mark {
+  width: 44px; height: 44px; border: 3px solid #000; border-radius: 4px; background: #000;
+  display: flex; align-items: center; justify-content: center; box-shadow: 2px 2px 0 #000;
+  transition: transform 0.2s var(--ease-spring), box-shadow 0.2s var(--ease-out);
+}
+.owner-root .owner-login-mark span { font-weight: 900; color: #facc15; font-family: var(--font-sg); }
+.owner-root .owner-login-card:hover .owner-login-mark { transform: rotate(-4deg) scale(1.04); }
+.owner-root .owner-login-title { font-size: 20px; margin-bottom: 2px; }
+.owner-root .owner-login-sub { font-family: var(--font-mono); font-size: 11px; font-weight: 800; color: var(--mute); letter-spacing: 0.6px; }
+.owner-root .owner-login-copy { margin-bottom: 18px; }
+.owner-root .owner-login-form { display: flex; flex-direction: column; gap: 12px; }
+.owner-root .owner-label { font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: var(--body); }
+.owner-root .owner-input {
+  background: #fff; border: 3px solid #000; border-radius: 4px; padding: 12px 14px;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700; box-shadow: 2px 2px 0 #000;
+  outline: none; width: 100%; transition: box-shadow 0.18s var(--ease-out), transform 0.18s var(--ease-out), border-color 0.18s var(--ease-out);
+}
+.owner-root .owner-input::placeholder { color: #a8a29e; }
+.owner-root .owner-input:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 #000; }
+.owner-root .owner-input:focus { border-color: #7c3aed; box-shadow: 3px 3px 0 #000, 0 0 0 3px rgba(124,58,237,0.25); transform: translate(-1px,-1px); }
+.owner-root .owner-error { align-self: flex-start; animation: fadeInUp 0.3s var(--ease-out); }
+.owner-root .owner-submit { width: 100%; justify-content: center; }
+.owner-root .owner-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+.owner-root .owner-submit:not(:disabled):hover { transform: translate(-2px,-2px); box-shadow: 5px 5px 0 0 #000; filter: saturate(1.08); }
+.owner-root .owner-login-meta { font-size: 11px; font-weight: 700; color: #78716c; font-family: var(--font-mono); text-align: center; }
+
+/* Shared responsive grids for subpages */
+.owner-root .owner-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.owner-root .owner-3col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+/* Responsive grids */
+@media (max-width: 1100px) {
+  .owner-root .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .owner-root .snapshot-grid { grid-template-columns: 1fr; }
+  .owner-root .owner-3col { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .owner-root .kpi-grid { grid-template-columns: 1fr; }
+  .owner-root .bento-kpis { grid-template-columns: 1fr; }
+  .owner-root .owner-2col { grid-template-columns: 1fr; }
+  .owner-root .owner-3col { grid-template-columns: 1fr; }
+  .owner-root .owner-page { padding: 16px; }
+  .owner-root .welcome-title { font-size: 24px; }
+  .owner-root .owner-login-card { padding: 20px; }
+}
+@media (max-width: 900px) {
+  .owner-root .owner-hamburger { display: inline-flex; align-items: center; justify-content: center; }
+  .owner-root .owner-jwt-hint { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .owner-root .stagger > *, .owner-root .hash-line, .owner-root .glow-badge,
+  .owner-root .glow-badge::after, .owner-root .chain-dot, .owner-root .live-dot.is-live,
+  .owner-root .kpi-hover::after, .owner-root .bento-kpi::after { animation: none !important; }
+  .owner-root .panel:hover, .owner-root .kpi-card:hover, .owner-root .bento-panel:hover,
+  .owner-root .bento-kpi:hover, .owner-root .btn:hover, .owner-root .owner-input:hover { transform: none !important; }
 }

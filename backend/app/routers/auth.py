@@ -142,6 +142,9 @@ def get_optional_user_dep(
         return None
     demo_token = os.getenv("DEMO_API_TOKEN", "").strip()
     if demo_token and token == demo_token:
+        # Demo token is read-only (GET only) — same guard as get_current_user_dep
+        if request.method != "GET":
+            return None
         demo_email = os.getenv("DEMO_USER_EMAIL", "demo@agentshield.local")
         demo_user = db.query(User).filter(User.email == demo_email).first()
         if demo_user and demo_user.is_active:

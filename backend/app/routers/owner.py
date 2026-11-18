@@ -15,8 +15,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Header, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Depends, Header, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 # bcrypt 4.2.0 removed __about__ — shim for passlib 1.7.4 (trapped warning otherwise)
@@ -73,7 +73,7 @@ _pattern_engine = PatternDetectionEngine()
 
 
 class OwnerVerifyRequest(BaseModel):
-    password: str
+    password: str = Field(min_length=1, max_length=128)
 
 
 def _check_verify_rate_limit(request: Request):
@@ -87,6 +87,11 @@ def _check_verify_rate_limit(request: Request):
     if len(hits) >= _VERIFY_MAX:
         raise HTTPException(status_code=429, detail="Too many attempts. Try again in 60s.")
     hits.append(now)
+    # bounded LRU: evict oldest IPs to prevent unbounded memory growth
+    if len(_verify_hits) > 1000:
+        oldest = next(iter(_verify_hits))
+        if oldest != ip:
+            del _verify_hits[oldest]
 
 
 def _verify_owner_password(plain: str) -> bool:
@@ -214,7 +219,7 @@ def get_owner_stats(
 
 @router.get("/activity")
 def get_owner_activity(
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
     _auth: str = Depends(_verify_owner),
 ):
@@ -246,7 +251,7 @@ def get_owner_activity(
 
 @router.get("/errors")
 def get_owner_errors(
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=100),
     db: Session = Depends(get_db),
     _auth: str = Depends(_verify_owner),
 ):
@@ -297,14 +302,18 @@ def get_owner_errors(
 
 @router.get("/users")
 def get_owner_users(
+    limit: int = Query(100, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     _auth: str = Depends(_verify_owner),
 ):
-    """List all users for the owner."""
-    users = db.query(User).order_by(User.created_at.desc()).all()
+    """List all users for the owner (paginated)."""
+    from sqlalchemy import func as _func
+    total = db.query(_func.count(User.user_id)).scalar() or 0
+    users = db.query(User).order_by(User.created_at.desc()).offset(offset).limit(limit).all()
 
     return {
-        "total": len(users),
+        "total": total,
         "users": [
             {
                 "user_id": str(u.user_id),

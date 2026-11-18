@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, ApiError } from "@/lib/api";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface AuditEntry {
   entry_id: string;
@@ -75,32 +76,56 @@ export default function AuditPage() {
   // pagination for audit
   const [auditOffset, setAuditOffset] = useState(0);
   const AUDIT_PAGE = 50;
+  const [hasMore, setHasMore] = useState(true);
+  const [exporting, setExporting] = useState<string | null>(null);
   async function loadMoreAudit() {
     if (!token) return;
     try {
       const next = await api.auditEntries(token, { limit: String(AUDIT_PAGE), offset: String(auditOffset + AUDIT_PAGE) });
       const more = (next as unknown as { entries?: AuditEntry[] })?.entries || (Array.isArray(next) ? next as unknown as AuditEntry[] : []);
-      if (more.length) { setEntries((prev) => [...prev, ...more]); setAuditOffset((o) => o + AUDIT_PAGE); }
-    } catch {}
+      if (more.length) {
+        setEntries((prev) => {
+          const seen = new Set(prev.map((p) => p.entry_id));
+          return [...prev, ...more.filter((m) => !seen.has(m.entry_id))];
+        });
+        setAuditOffset((o) => o + AUDIT_PAGE);
+        setHasMore(more.length >= AUDIT_PAGE);
+      } else {
+        setHasMore(false);
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to load more");
+    }
+  }
+  function download(url: string, name: string) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function handleExportJsonl() {
     if (!token) return;
+    setExporting("jsonl");
     try {
       const raw = await api.exportJsonl(token) as unknown;
       const text = typeof raw === "string" ? raw : JSON.stringify(raw);
       const blob = new Blob([text], { type: "application/jsonl" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `agentshield-audit-${new Date().toISOString().slice(0,10)}.jsonl`; a.click(); URL.revokeObjectURL(url);
-    } catch (e) { setError(e instanceof ApiError ? e.message : String(e)); }
+      download(url, `agentshield-audit-${new Date().toISOString().slice(0, 10)}.jsonl`);
+    } catch (e) { setError(e instanceof ApiError ? e.message : String(e)); } finally { setExporting(null); }
   }
   async function handleExportCompliance() {
     if (!token) return;
+    setExporting("compliance");
     try {
       const r = await api.complianceReport(token) as unknown as Record<string, unknown>;
       const blob = new Blob([JSON.stringify(r, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `agentshield-compliance-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url);
-    } catch {}
+      download(url, `agentshield-compliance-${new Date().toISOString().slice(0, 10)}.json`);
+    } catch (e) { setError(e instanceof ApiError ? e.message : String(e)); } finally { setExporting(null); }
   }
 
   const eventsByType = (timeline.events_by_type || {}) as Record<string, number>;
@@ -108,8 +133,10 @@ export default function AuditPage() {
   return (
     <div className="space-y-8 animate-slide-up">
       <div>
-        <h1 className="text-4xl font-black font-display tracking-tight">Audit Trail</h1>
-        <p className="mt-2 text-base font-medium" style={{ color: "#5A5248" }}>
+        <h1 className="text-5xl font-black font-display tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-gray-900 via-gray-800 to-gray-500 drop-shadow-sm pb-1">
+          Audit Trail
+        </h1>
+        <p className="mt-1 text-base font-medium text-gray-500 tracking-tight">
           Tamper-evident, hash-chained event log
         </p>
       </div>
@@ -169,16 +196,22 @@ export default function AuditPage() {
         <h2 className="text-xs font-bold tracking-[0.15em] uppercase mb-4" style={{ color: "#7A7164" }}>Time-Travel Forensics <span className="normal-case tracking-normal font-medium ml-2" style={{ color: "#7A7164" }}>— AS OF SYSTEM TIME (CockroachDB)</span></h2>
         <p className="text-xs mb-3" style={{ color: "#5A5248" }}>Reconstruct DB state at any timestamp — true MVCC on CockroachDB, filtered on SQLite.</p>
         <div className="flex items-center gap-3 flex-wrap">
-          <input type="datetime-local" value={timeTravelTs} onChange={(e) => setTimeTravelTs(e.target.value)} className="px-3 py-2 rounded-xl text-sm" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }} />
-          <button onClick={handleTimeTravel} disabled={timeTravelLoading || !timeTravelTs} className="px-4 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: "#0D7C5F" }}>{timeTravelLoading ? "Querying..." : "Query"}</button>
-          <span className="text-[11px] font-mono" style={{ color: "#7A7164" }}>{timeTravelResult ? `${(timeTravelResult.total as number) ?? 0} events • ${timeTravelResult.backend as string ?? ""}${(timeTravelResult as Record<string, unknown>)._tz_offset_min !== undefined ? ` • local UTC${Number((timeTravelResult as Record<string, unknown>)._tz_offset_min) >= 0 ? "+" : ""}${(Number((timeTravelResult as Record<string, unknown>)._tz_offset_min)/60)}` : ""}` : ""}</span>
-          <button onClick={handleExportJsonl} className="ml-auto px-3 py-2 rounded-xl text-xs font-bold" style={{ background: "rgba(0,0,0,0.04)", color: "#0D7C5F" }}>Export JSONL</button>
-          <button onClick={handleExportCompliance} className="px-3 py-2 rounded-xl text-xs font-bold" style={{ background: "rgba(0,0,0,0.04)", color: "#0D7C5F" }}>Export Compliance JSON</button>
+          <div>
+            <label htmlFor="tt-ts" className="sr-only">Time-travel timestamp</label>
+            <input id="tt-ts" type="datetime-local" value={timeTravelTs} onChange={(e) => setTimeTravelTs(e.target.value)} className="px-3 py-2 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/40" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(0,0,0,0.08)", color: "#1A1A1A" }} />
+          </div>
+          <button onClick={handleTimeTravel} disabled={timeTravelLoading || !timeTravelTs} aria-busy={timeTravelLoading} className="px-4 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40 transition-all duration-200 hover:-translate-y-px" style={{ background: "#0D7C5F" }}>{timeTravelLoading ? "Querying..." : "Query"}</button>
+          <span className="text-[11px] font-mono" style={{ color: "#7A7164" }} aria-live="polite">{timeTravelResult ? `${(timeTravelResult.total as number) ?? 0} events • ${timeTravelResult.backend as string ?? ""}${(timeTravelResult as Record<string, unknown>)._tz_offset_min !== undefined ? ` • local UTC${Number((timeTravelResult as Record<string, unknown>)._tz_offset_min) >= 0 ? "+" : ""}${(Number((timeTravelResult as Record<string, unknown>)._tz_offset_min)/60)}` : ""}` : ""}</span>
+          <button onClick={handleExportJsonl} disabled={exporting !== null} className="ml-auto px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 hover:-translate-y-px" style={{ background: "rgba(0,0,0,0.04)", color: "#0D7C5F" }}>{exporting === "jsonl" ? "Exporting…" : "Export JSONL"}</button>
+          <button onClick={handleExportCompliance} disabled={exporting !== null} className="px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 hover:-translate-y-px" style={{ background: "rgba(0,0,0,0.04)", color: "#0D7C5F" }}>{exporting === "compliance" ? "Exporting…" : "Export Compliance JSON"}</button>
         </div>
         {timeTravelTs && <p className="text-[11px] mt-2" style={{ color: "#7A7164" }}>Input is local time ({Intl.DateTimeFormat().resolvedOptions().timeZone} UTC{new Date().getTimezoneOffset() <= 0 ? "+" : ""}{(-new Date().getTimezoneOffset()/60)}); sent as UTC ISO to backend.</p>}
         {timeTravelResult && (
           <div className="mt-4 max-h-72 overflow-auto rounded-xl p-3 text-xs font-mono" style={{ background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)" }}>
             <pre className="whitespace-pre-wrap break-all">{JSON.stringify(timeTravelResult, null, 2).slice(0, 8000)}</pre>
+            {JSON.stringify(timeTravelResult, null, 2).length > 8000 ? (
+              <p className="mt-2 text-[11px] font-sans font-semibold" style={{ color: "#7A7164" }}>Truncated at 8,000 chars — use Export JSONL for full data.</p>
+            ) : null}
           </div>
         )}
       </div>
@@ -190,32 +223,45 @@ export default function AuditPage() {
             <p className="text-sm text-center py-10" style={{ color: "#7A7164" }}>No audit entries yet</p>
           )}
           <div className="space-y-1">
-            {entries.slice(0, 100).map((e, i) => {
-              const style = EVENT_COLORS[e.event_type] || EVENT_COLORS.default;
-              return (
-                <div
-                  key={e.entry_id}
-                  className="flex items-center justify-between py-3 px-3 rounded-xl transition-all duration-200 hover:bg-white/40 animate-slide-up"
-                  style={{ animationDelay: `${i * 40}ms` }}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold" style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}>
-                      {e.event_type}
+            <AnimatePresence>
+              {entries.slice(0, 60).map((e, i) => {
+                const style = EVENT_COLORS[e.event_type] || EVENT_COLORS.default;
+                return (
+                  <motion.div
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.2, delay: Math.min(i, 12) * 0.02 }}
+                    key={e.entry_id}
+                    className="flex items-center justify-between py-3 px-3 rounded-xl transition-all duration-200 hover:bg-white/60"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold shadow-sm" style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}>
+                        {e.event_type}
+                      </span>
+                      <span className="text-[11px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200 shadow-sm">
+                        Actor: {e.actor || "system"}
+                      </span>
+                      <span className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{e.action}</span>
+                      <span className="text-[11px] font-mono hidden md:inline bg-gray-100/50 px-2 py-0.5 rounded-md border border-gray-200/50" style={{ color: "#7A7164" }}>
+                        {e.entry_hash?.slice(0, 16)}...
+                      </span>
+                    </div>
+                    <span className="text-[11px]" style={{ color: "#7A7164" }}>
+                      {new Date(e.recorded_at).toLocaleString()}
                     </span>
-                    <span className="text-sm font-medium" style={{ color: "#1A1A1A" }}>{e.action}</span>
-                    <span className="text-[11px] font-mono hidden md:inline" style={{ color: "#7A7164" }}>
-                      {e.entry_hash?.slice(0, 12)}...
-                    </span>
-                  </div>
-                  <span className="text-[11px]" style={{ color: "#7A7164" }}>
-                    {new Date(e.recorded_at).toLocaleString()}
-                  </span>
-                </div>
-              );
-            })}
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           </div>
           <div className="flex justify-center pt-3">
-            <button onClick={loadMoreAudit} className="px-4 py-2 rounded-xl text-xs font-bold" style={{ background: "rgba(13,124,95,0.08)", color: "#0D7C5F" }}>Load More ({entries.length} loaded)</button>
+            {hasMore ? (
+              <button onClick={loadMoreAudit} className="px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 hover:-translate-y-px hover:shadow-md" style={{ background: "rgba(13,124,95,0.08)", color: "#0D7C5F" }}>Load More ({entries.length} loaded)</button>
+            ) : (
+              <span className="text-[11px] font-semibold" style={{ color: "#7A7164" }}>All caught up • {entries.length} loaded</span>
+            )}
           </div>
         </div>
       )}

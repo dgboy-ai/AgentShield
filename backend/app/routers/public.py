@@ -8,10 +8,9 @@ These are intentionally UNAUTHENTICATED read-only (and safe scan) endpoints so t
 
 Write operations still require auth — but scan/verify are safe to expose.
 
-Demo org resolution order:
-  1. DEMO_ORG_ID env var if set and exists
-  2. First organization in DB
-  3. Auto-create a Demo Organization with seeded data (constraints + audit)
+Demo org resolution (locked down — no first-tenant fallback):
+  1. DEMO_ORG_ID env var if set and exists → that org only
+  2. Otherwise None (public endpoints return empty, never another tenant's data)
 """
 
 import os
@@ -41,16 +40,12 @@ router = APIRouter(prefix="/api/public", tags=["public-demo"])
 
 
 def _resolve_demo_org_id(db: Session) -> Optional[str]:
-    """Resolve demo org id for public reads."""
+    """Resolve demo org id for public reads — DEMO_ORG_ID only, never first-tenant fallback."""
     demo_org_id = os.getenv("DEMO_ORG_ID", "").strip()
     if demo_org_id:
         org = db.query(Organization).filter(Organization.org_id == demo_org_id).first()
         if org:
             return str(org.org_id)
-    # fallback: first org in DB
-    first = db.query(Organization).order_by(Organization.created_at.asc()).first()
-    if first:
-        return str(first.org_id)
     return None
 
 
@@ -257,12 +252,15 @@ def public_chain_verify(db: Session = Depends(get_db)):
 def public_scan(body: dict, db: Session = Depends(get_db)):
     """
     Public OWASP ASI06 scan — no auth required.
-    Body: { "text": "..." }
+    Body: { "text": "..." } (max 20000 chars, 413 if larger)
     Used by WebMCP tool `scanForPoisoning` without a JWT.
     """
+    from fastapi import HTTPException
     text = body.get("text", "") if isinstance(body, dict) else ""
     if not text:
         return {"error": "Provide {\"text\": \"...\"}", "blocked": False, "match_count": 0}
+    if not isinstance(text, str) or len(text) > 20000:
+        raise HTTPException(status_code=413, detail="Scan text too large: max 20000 chars")
     result = _pattern_engine.scan(text)
     # Record audit if demo org exists (best-effort)
     demo_org_id = _resolve_demo_org_id(db)
