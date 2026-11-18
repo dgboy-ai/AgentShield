@@ -36,7 +36,9 @@ def load_hash_chain(engine, db: Session) -> None:
     from app.models.constraint import Constraint
     from app.models.memory import Memory
     from app.models.alert import Alert
+    from app.models.hash_chain_entry import HashChainEntry as HashChainEntryDB
     from app.core.hash_chain import ChainEntry, EntryType
+    import json
 
     try:
         engine.clear()
@@ -51,44 +53,66 @@ def load_hash_chain(engine, db: Session) -> None:
     # For memories, we also limit per org via window function would be ideal, but for now paginate overall and group
     # To avoid loading millions, we use yield_per and then group, but still need to limit per org
     memories = db.query(Memory).order_by(Memory.created_at.asc()).yield_per(1000).all()
+    # Persisted non-memory chain entries (constraints) — restore exact hashes/sequence
+    chain_rows = db.query(HashChainEntryDB).order_by(HashChainEntryDB.created_at.asc()).yield_per(1000).all()
     # If total is huge, we truncate per org to recent MAX_PER_ORG_ON_STARTUP
     from collections import defaultdict
     org_items: dict[str, list] = defaultdict(list)
+    persisted_by_org: dict[str, set] = defaultdict(set)
+    for row in chain_rows:
+        org_key = str(row.org_id)
+        org_items[org_key].append(("persisted", row.created_at, row))
+        persisted_by_org[org_key].add(str(row.entry_id))
+    # Constraints without a persisted chain row are legacy (pre-upgrade) data.
+    legacy_constraints: list = []
     for c in constraints:
-        org_items[str(c.org_id)].append(("constraint", c.created_at, c))
+        if str(c.constraint_id) in persisted_by_org.get(str(c.org_id), set()):
+            continue
+        legacy_constraints.append(c)
     for m in memories:
         org_items[str(m.org_id)].append(("memory", m.created_at, m))
+
+    def _chain_sort_key(item):
+        kind, created_at, obj = item
+        if kind == "persisted":
+            seq = obj.sequence_number or 0
+        elif kind == "memory":
+            seq = getattr(obj, "sequence_number", None) or 0
+        else:
+            seq = 0
+        return (seq, created_at or datetime.min.replace(tzinfo=timezone.utc))
     # Truncate per-org to recent MAX_PER_ORG_ON_STARTUP to keep memory bounded
     for org_id in list(org_items.keys()):
         if len(org_items[org_id]) > MAX_PER_ORG_ON_STARTUP:
             logger.warning(f"Org {org_id} has {len(org_items[org_id])} entries, truncating to recent {MAX_PER_ORG_ON_STARTUP} for startup cache (older via DB)")
             # Keep most recent
-            org_items[org_id] = sorted(org_items[org_id], key=lambda x: x[1] or datetime.min.replace(tzinfo=timezone.utc))[-MAX_PER_ORG_ON_STARTUP:]
+            org_items[org_id] = sorted(org_items[org_id], key=_chain_sort_key)[-MAX_PER_ORG_ON_STARTUP:]
 
     total = 0
     migrated = 0
     tampered_orgs: set[str] = set()
 
     # First pass: restore DB's stored hashes (preserve tamper evidence)
+    legacy_orgs: set[str] = set()
     for org_id, items in org_items.items():
-        items.sort(key=lambda x: x[1] or datetime.min.replace(tzinfo=timezone.utc))
+        items.sort(key=_chain_sort_key)
         for kind, _, obj in items:
-            if kind == "constraint":
-                payload = {
-                    "constraint_id": str(obj.constraint_id),
-                    "text": obj.constraint_text,
-                    "type": obj.constraint_type,
-                }
-                entry_type = EntryType.CONSTRAINT
-                # For constraints, hash chain is derived; use DB timestamp but preserve
-                # No DB hash to restore for chain (chain hash not stored in constraint table)
-                # So we still append deterministically (no tamper evidence needed for chain part)
-                # But we use restore for audit? For now append.
-                from datetime import timezone as _tz
-                # Use DB timestamp for determinism
-                engine.append(org_id, entry_type, payload, entry_id=str(obj.constraint_id), created_at=obj.created_at)
+            if kind == "persisted":
+                entry = ChainEntry(
+                    entry_id=str(obj.entry_id),
+                    entry_type=EntryType(obj.entry_type),
+                    org_id=org_id,
+                    payload=json.loads(obj.payload_json),
+                    previous_hash=obj.previous_hash,
+                    sequence_number=obj.sequence_number or 0,
+                    created_at=obj.created_at,
+                )
+                # Preserve exact stored hash/prev/sequence (tamper evidence intact)
+                entry.entry_hash = obj.entry_hash
+                entry.previous_hash = obj.previous_hash
+                entry.sequence_number = obj.sequence_number or 0
+                engine.restore_entry(entry)
                 total += 1
-                continue
             else:
                 payload = {
                     "memory_id": str(obj.memory_id),
@@ -119,8 +143,33 @@ def load_hash_chain(engine, db: Session) -> None:
                 engine.restore_entry(entry)
                 total += 1
 
+    # Legacy constraints (created before chain entries were persisted): exact
+    # hashes are unrecoverable. Only orgs that contain nothing else can be
+    # rebuilt deterministically; mixed chains are flagged as legacy instead of
+    # producing a false tampering alarm on every restart.
+    for c in legacy_constraints:
+        org_id = str(c.org_id)
+        if org_id in org_items:
+            legacy_orgs.add(org_id)
+            continue
+        payload = {
+            "constraint_id": str(c.constraint_id),
+            "text": c.constraint_text,
+            "type": c.constraint_type,
+        }
+        engine.append(org_id, EntryType.CONSTRAINT, payload, entry_id=str(c.constraint_id), created_at=c.created_at)
+        total += 1
+    for org_id in legacy_orgs:
+        logger.warning(
+            "Org %s has legacy constraint chain entries without persisted hashes — "
+            "exact chain reconstruction is impossible (pre-upgrade data). Skipping "
+            "false tamper alert; create a fresh org or investigate manually.", org_id
+        )
+
     # Second pass: verify per-org and handle legacy vs tampering
     for org_id in list(org_items.keys()):
+        if org_id in legacy_orgs:
+            continue
         # Only check orgs that have memories
         has_mem = any(k == "memory" for k, _, _ in org_items[org_id])
         if not has_mem:
@@ -144,7 +193,7 @@ def load_hash_chain(engine, db: Session) -> None:
                     del engine._sequence_counters[org_id]
                 engine._verify_cache.pop(org_id, None)
                 # Re-append in order
-                org_items[org_id].sort(key=lambda x: x[1] or datetime.min.replace(tzinfo=timezone.utc))
+                org_items[org_id].sort(key=_chain_sort_key)
                 for kind, _, obj in org_items[org_id]:
                     if kind != "memory":
                         continue
@@ -172,11 +221,25 @@ def load_hash_chain(engine, db: Session) -> None:
                 # Tampering detected - DO NOT overwrite, preserve evidence, alert + SIEM webhook (1.4)
                 logger.critical(f"TAMPERING DETECTED for org {org_id} at {result.broken_at} entry {result.broken_entry_id} - NOT auto-healing, preserving evidence")
                 tampered_orgs.add(org_id)
-                # Create alert in DB for SIEM
+                # Create alert in DB for SIEM (deduplicated: one per broken entry)
                 try:
+                    existing_alerts = (
+                        db.query(Alert)
+                        .filter(
+                            Alert.org_id == org_id,
+                            Alert.alert_type == "hash_chain_tamper",
+                            Alert.is_resolved == False,  # noqa: E712
+                        )
+                        .all()
+                    )
+                    already_alerted = any(
+                        (a.patterns_matched or {}).get("broken_entry_id") == result.broken_entry_id
+                        for a in existing_alerts
+                    )
                     for kind, _, obj in org_items[org_id]:
                         if kind == "memory":
-                            db.add(Alert(org_id=org_id, alert_type="hash_chain_tamper", severity="critical", description=f"Hash chain broken at {result.broken_at} entry {result.broken_entry_id} for org {org_id} - startup detected tampering, not auto-healed", patterns_matched={"broken_at": result.broken_at, "broken_entry_id": result.broken_entry_id, "org_id": org_id}))
+                            if not already_alerted:
+                                db.add(Alert(org_id=org_id, alert_type="hash_chain_tamper", severity="critical", description=f"Hash chain broken at {result.broken_at} entry {result.broken_entry_id} for org {org_id} - startup detected tampering, not auto-healed", patterns_matched={"broken_at": result.broken_at, "broken_entry_id": result.broken_entry_id, "org_id": org_id}))
                             break
                     db.flush()
                     # Also push to SIEM/webhook if configured (1.4)

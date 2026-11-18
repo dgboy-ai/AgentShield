@@ -57,13 +57,15 @@ def _verify_db_chain(org_id: str, db: Session) -> dict:
     """
     DB-backed verification for 1.2: recomputes hashes from DB rows and checks
     previous_hash linkage. Detects direct DB tampering (content/previous_hash/entry_hash modified via SQL).
-    """
-    import hashlib as _hl
 
+    Fix: the org hash chain also contains constraint entries, so the first memory
+    does not necessarily link to the chain seed. Previous hashes are reconciled
+    against the full in-memory chain instead of assuming a memory-only chain.
+    """
     rows = (
         db.query(MemoryDB)
         .filter(MemoryDB.org_id == org_id)
-        .order_by(MemoryDB.created_at.asc(), MemoryDB.memory_id.asc())
+        .order_by(MemoryDB.sequence_number.asc(), MemoryDB.created_at.asc(), MemoryDB.memory_id.asc())
         .all()
     )
     total = len(rows)
@@ -71,8 +73,73 @@ def _verify_db_chain(org_id: str, db: Session) -> dict:
         return {"total_entries": 0, "valid": True, "broken_at": None, "checked": "db"}
 
     seed = hash_chain._seed_hash
+    full_chain = list(hash_chain._chains.get(org_id, []))
+    mem_entries = [e for e in full_chain if e.entry_type == EntryType.MEMORY]
+    mem_by_id = {e.entry_id: e for e in mem_entries}
+    chain_hashes = {e.entry_hash for e in full_chain}
+
+    # If the in-memory cache covers this org's full memory set, counts must match
+    # (catches out-of-band row deletion; skip when cache was intentionally truncated).
+    if 0 < len(mem_entries) and total <= 1000 and len(mem_entries) != total:
+        return {
+            "total_entries": total,
+            "valid": False,
+            "broken_at": None,
+            "reason": "memory entry count mismatch between DB and hash chain (possible deletion)",
+            "db_count": total,
+            "chain_count": len(mem_entries),
+            "checked": "db",
+        }
+
     for idx, row in enumerate(rows):
-        # Reconstruct payload exactly as stored at write time
+        mem_entry = mem_by_id.get(str(row.memory_id))
+        if mem_entry is not None:
+            if row.previous_hash != mem_entry.previous_hash or row.entry_hash != mem_entry.entry_hash:
+                return {
+                    "total_entries": total,
+                    "valid": False,
+                    "broken_at": idx,
+                    "broken_entry_id": str(row.memory_id),
+                    "reason": "DB hash fields differ from in-memory hash chain",
+                    "checked": "db",
+                }
+            if (row.sequence_number or 0) != mem_entry.sequence_number:
+                return {
+                    "total_entries": total,
+                    "valid": False,
+                    "broken_at": idx,
+                    "broken_entry_id": str(row.memory_id),
+                    "reason": "sequence number mismatch between DB and hash chain",
+                    "checked": "db",
+                }
+        # Linkage: previous row is not necessarily the immediate chain predecessor
+        # (constraint entries may sit in between), so accept any hash present in
+        # the full reconstructed chain; otherwise require the expected link/seed.
+        if idx == 0:
+            if row.previous_hash != seed and row.previous_hash not in chain_hashes:
+                return {
+                    "total_entries": total,
+                    "valid": False,
+                    "broken_at": idx,
+                    "broken_entry_id": str(row.memory_id),
+                    "reason": "previous_hash mismatch",
+                    "expected_prev": seed,
+                    "actual_prev": row.previous_hash,
+                    "checked": "db",
+                }
+        elif row.previous_hash != rows[idx - 1].entry_hash and row.previous_hash not in chain_hashes:
+            return {
+                "total_entries": total,
+                "valid": False,
+                "broken_at": idx,
+                "broken_entry_id": str(row.memory_id),
+                "reason": "previous_hash mismatch",
+                "expected_prev": rows[idx - 1].entry_hash,
+                "actual_prev": row.previous_hash,
+                "checked": "db",
+            }
+
+        # Recompute hash using same logic as ChainEntry
         payload = {
             "memory_id": str(row.memory_id),
             "content": row.content,
@@ -81,24 +148,7 @@ def _verify_db_chain(org_id: str, db: Session) -> dict:
             "trust_level": row.trust_level,
             "source_provenance": row.source_provenance,
         }
-        # Sequence: use stored sequence_number if present, else idx+1 (legacy)
         seq = row.sequence_number if row.sequence_number is not None else idx + 1
-        # Expected previous_hash
-        expected_prev = seed if idx == 0 else rows[idx - 1].entry_hash
-        # Check previous_hash linkage
-        if row.previous_hash != expected_prev:
-            return {
-                "total_entries": total,
-                "valid": False,
-                "broken_at": idx,
-                "broken_entry_id": str(row.memory_id),
-                "reason": "previous_hash mismatch",
-                "expected_prev": expected_prev,
-                "actual_prev": row.previous_hash,
-                "checked": "db",
-            }
-        # Recompute hash using same logic as ChainEntry
-        # Need to use stored created_at for determinism
         tmp = ChainEntry(
             entry_id=str(row.memory_id),
             entry_type=EntryType.MEMORY,
@@ -108,11 +158,8 @@ def _verify_db_chain(org_id: str, db: Session) -> dict:
             sequence_number=seq,
             created_at=row.created_at,
         )
-        # Override created_at exactly as stored (ensure isoformat matches)
         tmp.created_at = row.created_at
         recomputed = tmp._compute_hash()
-        # But ChainEntry.__init__ already computed with row.created_at, so recomputed == tmp.entry_hash
-        # Use tmp.entry_hash as recomputed
         if recomputed != row.entry_hash:
             return {
                 "total_entries": total,

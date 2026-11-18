@@ -5,6 +5,8 @@ from .constraint import Constraint
 from .memory import Memory
 from .audit_log import AuditLog
 from .alert import Alert
+from .chain_anchor import ChainAnchor
+from .hash_chain_entry import HashChainEntry
 
 __all__ = [
     "Base",
@@ -16,4 +18,6 @@ __all__ = [
     "Memory",
     "AuditLog",
     "Alert",
+    "ChainAnchor",
+    "HashChainEntry",
 ]

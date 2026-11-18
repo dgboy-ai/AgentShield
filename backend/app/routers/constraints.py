@@ -5,6 +5,7 @@ from app.models.database import get_db
 from app.models.user import User
 from app.models.constraint import Constraint as ConstraintDB
 from app.models.audit_log import AuditLog as AuditLogDB
+from app.models.hash_chain_entry import HashChainEntry as HashChainEntryDB
 from app.routers.auth import get_current_user_dep
 from app.schemas.constraint import ConstraintCreate, ConstraintUpdate, ConstraintResponse
 from app.core.constraint_pinning import (
@@ -173,12 +174,26 @@ def create_constraint(
     db.add(db_constraint)
 
     # Add to hash chain - deterministic entry_id for restart idempotency
-    hash_chain.append(
+    chain_entry = hash_chain.append(
         org_id,
         EntryType.CONSTRAINT,
         {"constraint_id": pinned.constraint_id, "text": data.text, "type": data.constraint_type},
         entry_id=pinned.constraint_id,
     )
+    # Persist the chain entry itself so restarts can restore an exact chain.
+    # Without this, constraint hashes were recomputed on startup and any memory
+    # appended after a constraint failed verification after a restart.
+    import json
+    db.add(HashChainEntryDB(
+        entry_id=chain_entry.entry_id,
+        org_id=org_id,
+        entry_type=chain_entry.entry_type.value,
+        payload_json=json.dumps(chain_entry.payload, sort_keys=True, separators=(",", ":")),
+        previous_hash=chain_entry.previous_hash,
+        entry_hash=chain_entry.entry_hash,
+        sequence_number=chain_entry.sequence_number,
+        created_at=chain_entry.created_at,
+    ))
 
     # Record audit event (include signing backend for non-repudiation)
     audit_trail.record(
