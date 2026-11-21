@@ -321,7 +321,7 @@ export default function AuditPage() {
   useEffect(() => {
     if (!token) return;
     const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const es = new EventSource(`${base}/api/audit/stream`, { withCredentials: true } as unknown as EventSourceInit);
+    const es = new EventSource(`${base}/api/audit/stream?token=${encodeURIComponent(token)}`, { withCredentials: true } as unknown as EventSourceInit);
     esRef.current = es;
 
     es.onopen = () => setStreamConnected(true);

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -97,6 +99,10 @@ def _persist_audit_to_db(event_type: str, data: dict) -> None:
                 previous_hash=prev_hash,
                 entry_hash=entry_hash,
                 sequence_number=data.get("chain_length"),
+                # Persist the exact timestamp the entry_hash was computed from;
+                # the model default (insert time) differs by microseconds and
+                # breaks verify_chain's recompute check after a restart.
+                recorded_at=(last.recorded_at if last is not None else datetime.now(timezone.utc)),
             )
             entry = AuditLogDB(**entry_data)
             db.add(entry)

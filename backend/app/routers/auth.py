@@ -90,6 +90,10 @@ def _extract_token(request: Request, credentials: Optional[HTTPAuthorizationCred
     cookie_token = request.cookies.get("access_token")
     if cookie_token:
         return cookie_token
+    # Fallback to query param (EventSource cannot set Authorization headers)
+    query_token = request.query_params.get("token") or request.query_params.get("access_token")
+    if query_token:
+        return query_token
     return None
 
 def get_current_user_dep(

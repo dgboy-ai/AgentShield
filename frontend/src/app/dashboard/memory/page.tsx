@@ -220,7 +220,7 @@ export default function MemoryPage() {
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value)}
-                className="px-3 py-2 rounded-xl text-xs font-mono font-medium bg-[#121212] border border-border text-foreground focus:outline-none focus:border-[#059669]"
+                className="px-3 py-2 rounded-xl text-xs font-mono font-medium bg-[#E6E0D4] border border-border text-foreground focus:outline-none focus:border-[#059669]"
               >
                 <option value="episodic">Episodic</option>
                 <option value="semantic">Semantic</option>
