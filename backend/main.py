@@ -9,6 +9,7 @@ scheduler = AsyncIOScheduler()
 
 from app.models.database import init_db, check_db_health, SessionLocal
 from app.routers import auth_router, constraints_router, memories_router, audit_router, scan_router, public_router, owner_router
+from app.routers.chat import router as chat_router
 from app.routers.v1 import v1_router
 from app.middleware import RateLimitMiddleware, RequestIDMiddleware
 from app.middleware.body_limit import BodyLimitMiddleware
@@ -76,6 +77,7 @@ app.include_router(constraints_router)
 app.include_router(memories_router)
 app.include_router(audit_router)
 app.include_router(scan_router)
+app.include_router(chat_router)
 app.include_router(owner_router)
 
 # Versioned routes (same handlers, /v1 prefix)

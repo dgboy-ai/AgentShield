@@ -20,6 +20,7 @@ interface ApiOptions {
   method?: string;
   body?: unknown;
   token?: string;
+  timeoutMs?: number;
 }
 
 export class ApiError extends Error {
@@ -89,7 +90,7 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
     res = await doFetch(path, opts, headers, ctrl.signal);
@@ -166,6 +167,48 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
 
   if (res.status === 204) return undefined as T;
   return (await parseBody(res)) as T;
+}
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatShieldMatch {
+  pattern_id: string;
+  pattern_name: string;
+  category: string;
+  severity: string;
+  matched_text: string;
+}
+
+export interface ChatShieldInfo {
+  blocked: boolean;
+  risk_score: number;
+  match_count: number;
+  max_severity: string;
+  categories_triggered: string[];
+  matches: ChatShieldMatch[];
+  scan_time_ms: number;
+}
+
+export interface ChatLlmInfo {
+  model: string;
+  latency_ms: number;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+}
+
+export interface ChatPinnedInfo {
+  count: number;
+  token_overhead: number;
+}
+
+export interface ChatResponse {
+  reply: string;
+  shield: ChatShieldInfo;
+  llm: ChatLlmInfo | null;
+  pinned: ChatPinnedInfo;
 }
 
 export const api = {
@@ -247,6 +290,15 @@ export const api = {
     }),
   scanPatterns: (token: string) =>
     request<Record<string, unknown>>("/api/scan/patterns", { token }),
+
+  // Chat (live Groq agent behind the scan gate)
+  chat: (token: string, message: string, history: ChatTurn[] = []) =>
+    request<ChatResponse>("/api/chat", {
+      method: "POST",
+      body: { message, history },
+      token,
+      timeoutMs: 45000,
+    }),
 
   // Audit
   auditEntries: (token: string, params?: Record<string, string>) => {

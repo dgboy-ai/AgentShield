@@ -37,6 +37,7 @@ class EventType(str, Enum):
     COMPACTION_SIMULATED = "compaction_simulated"
     CONSTRAINTS_REINJECTED = "constraints_reinjected"
     PATTERN_DETECTED = "pattern_detected"
+    CHAT_TURN = "chat_turn"
     SIGNING_OPERATION = "signing_operation"
     CHAIN_VERIFIED = "chain_verified"
     CHAIN_ANCHORED = "chain_anchored"

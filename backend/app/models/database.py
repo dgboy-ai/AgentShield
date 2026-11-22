@@ -55,7 +55,23 @@ elif is_postgres:
         "pool_pre_ping": True,
     })
 
-engine = create_engine(DATABASE_URL, **engine_kwargs)
+try:
+    engine = create_engine(DATABASE_URL, **engine_kwargs)
+    # Quick probe to ensure DB is reachable
+    with engine.connect() as probe:
+        probe.execute(text("SELECT 1"))
+except Exception as e:
+    logger.warning("Database connection to %s failed (%s). Falling back to local SQLite.", DATABASE_URL, e)
+    DATABASE_URL = "sqlite:///./agentshield.db"
+    is_sqlite = True
+    is_postgres = False
+    is_cockroach = False
+    engine_kwargs = {
+        "pool_pre_ping": True,
+        "connect_args": {"check_same_thread": False},
+        "poolclass": NullPool,
+    }
+    engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 # Log slow queries in development
 if ENVIRONMENT == "development":

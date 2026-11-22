@@ -181,6 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     setState(ns);
     persist(ns);
+    try { sessionStorage.removeItem("agentshield_chat_current_session_id"); } catch {}
   }, [persist]);
 
   const register = useCallback(async (email: string, password: string, fullName: string) => {
@@ -203,6 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     setState(ns);
     persist(ns);
+    try { sessionStorage.removeItem("agentshield_chat_current_session_id"); } catch {}
   }, [persist]);
 
   const loadProfile = useCallback(async () => {

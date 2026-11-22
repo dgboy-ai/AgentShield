@@ -6,52 +6,63 @@ import { useAuth } from "@/lib/auth-context";
 
 const NAV_ITEMS = [
   {
-    href: "/dashboard",
-    label: "Overview",
-    description: "Command center",
+    href: "/dashboard/chat",
+    label: "Agent Chat",
+    badge: "LIVE",
     icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard",
+    label: "Dashboard",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="7" height="9" />
+        <rect x="14" y="3" width="7" height="5" />
+        <rect x="14" y="12" width="7" height="9" />
+        <rect x="3" y="16" width="7" height="5" />
       </svg>
     ),
   },
   {
     href: "/dashboard/constraints",
     label: "Constraints",
-    description: "Pinned protection rules",
     icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
       </svg>
     ),
   },
   {
     href: "/dashboard/memory",
-    label: "Memory",
-    description: "Protected memory vault",
+    label: "Memory Engine",
     icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+        <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
       </svg>
     ),
   },
   {
     href: "/dashboard/audit",
-    label: "Audit",
-    description: "Hash-chained event log",
+    label: "Audit Trail",
     icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
       </svg>
     ),
   },
   {
     href: "/dashboard/compliance",
     label: "Compliance",
-    description: "EU AI Act reporting",
     icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <polyline points="9 11 11 13 15 9" />
       </svg>
     ),
   },
@@ -67,69 +78,239 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   };
 
   return (
-    <aside className="flex h-full w-[260px] flex-col border-r border-[#E2E8F0] bg-white">
-      <div className="border-b border-[#E2E8F0] px-5 pb-5 pt-6">
-        <Link href="/dashboard" onClick={handleNav} className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#059669] shadow-[0_2px_8px_rgba(5,150,105,0.25)]">
-            <span className="font-heading text-sm font-bold text-white">AS</span>
+    <aside
+      style={{
+        display: "flex",
+        height: "100%",
+        width: "250px",
+        flexDirection: "column",
+        background: "#F4F3EF",
+        borderRight: "3px solid #000000",
+        boxSizing: "border-box",
+        fontFamily: "var(--font-sans, system-ui, sans-serif)",
+      }}
+    >
+      {/* Brand Header */}
+      <div
+        style={{
+          height: "72px",
+          display: "flex",
+          alignItems: "center",
+          padding: "0 18px",
+          borderBottom: "3px solid #000000",
+          background: "#FFFFFF",
+          boxSizing: "border-box",
+        }}
+      >
+        <Link
+          href="/dashboard"
+          onClick={handleNav}
+          style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: "12px", width: "100%" }}
+        >
+          <div
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "6px",
+              background: "#059669",
+              border: "3px solid #000000",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "3px 3px 0px #000000",
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontWeight: 900, fontSize: "16px", color: "#FFFFFF", fontFamily: "monospace" }}>
+              AS
+            </span>
           </div>
-          <div className="min-w-0">
-            <div className="font-heading text-[17px] font-bold leading-tight tracking-tight text-[#172033]">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontWeight: 900,
+                fontSize: "17px",
+                letterSpacing: "0.5px",
+                color: "#000000",
+                lineHeight: 1.1,
+              }}
+            >
               AgentShield
             </div>
-            <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748B]">
+            <div
+              style={{
+                fontSize: "10px",
+                fontWeight: 800,
+                color: "#475569",
+                letterSpacing: "1px",
+                textTransform: "uppercase",
+                marginTop: "2px",
+              }}
+            >
               Memory Defense
             </div>
           </div>
         </Link>
       </div>
 
-      <div className="px-5 pb-2 pt-5">
-        <span className="ds-label">Navigation</span>
+      {/* Navigation Label */}
+      <div style={{ padding: "16px 18px 8px 18px" }}>
+        <span
+          style={{
+            fontSize: "11px",
+            fontWeight: 900,
+            color: "#64748B",
+            textTransform: "uppercase",
+            letterSpacing: "1.5px",
+          }}
+        >
+          Navigation
+        </span>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4" aria-label="Dashboard navigation">
+      {/* Nav List */}
+      <nav
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+          padding: "0 14px",
+          flex: 1,
+          overflowY: "auto",
+        }}
+      >
         {NAV_ITEMS.map((item) => {
           const active =
             item.href === "/dashboard"
               ? pathname === "/dashboard"
               : pathname.startsWith(item.href);
+
           return (
             <Link
               key={item.href}
               href={item.href}
               onClick={handleNav}
-              aria-current={active ? "page" : undefined}
-              className={`group flex items-start gap-3 rounded-xl border px-3 py-3 transition-all duration-200 ${
-                active
-                  ? "border-[#A7F3D0] bg-[#ECFDF5] text-[#047857]"
-                  : "border-transparent text-[#475569] hover:border-[#E2E8F0] hover:bg-[#F8FAFC] hover:text-[#172033]"
-              }`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "10px 14px",
+                borderRadius: "6px",
+                fontSize: "14px",
+                fontWeight: 800,
+                color: active ? "#000000" : "#475569",
+                background: active ? "#FACC15" : "transparent",
+                border: active ? "3px solid #000000" : "3px solid transparent",
+                boxShadow: active ? "3px 3px 0px #000000" : "none",
+                transform: active ? "translate(-2px, -2px)" : "none",
+                transition: "all 0.15s ease",
+                textDecoration: "none",
+              }}
+              onMouseEnter={(e) => {
+                if (!active) {
+                  e.currentTarget.style.background = "#FFFFFF";
+                  e.currentTarget.style.color = "#000000";
+                  e.currentTarget.style.border = "3px solid #000000";
+                  e.currentTarget.style.boxShadow = "3px 3px 0px #000000";
+                  e.currentTarget.style.transform = "translate(-2px, -2px)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!active) {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = "#475569";
+                  e.currentTarget.style.border = "3px solid transparent";
+                  e.currentTarget.style.boxShadow = "none";
+                  e.currentTarget.style.transform = "none";
+                }
+              }}
             >
-              <span className={`mt-0.5 ${active ? "text-[#059669]" : "text-[#64748B] group-hover:text-[#475569]"}`}>
+              <span style={{ display: "flex", alignItems: "center", color: "#000000" }}>
                 {item.icon}
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[14px] font-semibold leading-tight">{item.label}</span>
-                <span className={`mt-0.5 block text-[11px] leading-tight ${active ? "text-[#047857]" : "text-[#64748B]"}`}>
-                  {item.description}
-                </span>
+              <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap" }}>
+                {item.label}
               </span>
-              {active ? <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#059669]" /> : null}
+              {item.badge && (
+                <span
+                  style={{
+                    fontSize: "9px",
+                    fontWeight: 900,
+                    background: active ? "#000000" : "#059669",
+                    color: active ? "#FACC15" : "#FFFFFF",
+                    padding: "2px 6px",
+                    borderRadius: "3px",
+                    fontFamily: "monospace",
+                    letterSpacing: "0.5px",
+                  }}
+                >
+                  {item.badge}
+                </span>
+              )}
             </Link>
           );
         })}
       </nav>
 
-      <div className="border-t border-[#E2E8F0] p-4">
-        <div className="flex items-center gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ECFDF5] text-sm font-bold text-[#047857] ring-1 ring-[#A7F3D0]">
-            {email?.charAt(0).toUpperCase() || "U"}
+      {/* User Footer Card */}
+      <div style={{ padding: "14px", borderTop: "3px solid #000000", background: "#FFFFFF" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            background: "#F4F3EF",
+            border: "2px solid #000000",
+            borderRadius: "6px",
+            padding: "8px 10px",
+            boxShadow: "2px 2px 0px #000000",
+          }}
+        >
+          <div
+            style={{
+              width: "32px",
+              height: "32px",
+              borderRadius: "50%",
+              background: "#18181B",
+              color: "#FFFFFF",
+              border: "2px solid #000000",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "13px",
+              fontWeight: 900,
+              fontFamily: "monospace",
+              flexShrink: 0,
+            }}
+          >
+            {email?.charAt(0).toUpperCase() || "A"}
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[13px] font-semibold text-[#172033]">{email || "Signed in"}</div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-[#64748B]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#059669]" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: "12px",
+                fontWeight: 800,
+                color: "#000000",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                lineHeight: 1.2,
+              }}
+            >
+              {email || "agent-demo"}
+            </div>
+            <div
+              style={{
+                fontSize: "10px",
+                fontWeight: 700,
+                color: "#059669",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                marginTop: "2px",
+              }}
+            >
+              <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#059669" }} />
               Authenticated
             </div>
           </div>
@@ -139,11 +320,19 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               logout();
               router.push("/login");
             }}
-            className="rounded-lg p-2 text-[#64748B] transition-colors hover:bg-white hover:text-[#DC2626]"
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "4px",
+              color: "#64748B",
+              display: "flex",
+              alignItems: "center",
+            }}
             title="Sign out"
             aria-label="Sign out"
           >
-            <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
             </svg>
           </button>
