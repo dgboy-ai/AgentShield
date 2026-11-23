@@ -429,7 +429,8 @@
   opacity: 0.25;
   pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
-  animation: grain 8s steps(10) infinite;
+  /* disabled animated SVG turbulence filter for smooth scrolling */
+  transform: translateZ(0);
 }
 
 /* ═══════════════════════════════════════════════════
@@ -459,8 +460,8 @@
 .glass-card {
   position: relative;
   background: rgba(255, 255, 255, 0.9); /* Much more opaque for text visibility */
-  backdrop-filter: blur(40px) saturate(1.8);
-  -webkit-backdrop-filter: blur(40px) saturate(1.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.9);
   box-shadow:
     0 4px 6px rgba(0, 0, 0, 0.02),

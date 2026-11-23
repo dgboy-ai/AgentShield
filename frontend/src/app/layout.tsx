@@ -25,7 +25,7 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AgentShield — Tamper-Evident Memory Defense for LLM Agents",
+  title: "AgentShield — Python security library for LLM agents",
   description:
     "Protect AI agent memory from poisoning, tampering, and governance decay. Hash chain integrity, constraint pinning, and EU AI Act compliance.",
 };

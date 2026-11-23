@@ -65,8 +65,8 @@ function Reveal({ children, delay = 0, y = 18 }: { children: React.ReactNode; de
   return (
     <motion.div
       ref={ref}
-      initial={{ opacity: 0, y, filter: "blur(6px)" }}
-      animate={inView ? { opacity: 1, y: 0, filter: "blur(0px)" } : {}}
+      initial={{ opacity: 0, y: 16 }}
+      animate={inView ? { opacity: 1, y: 0 } : {}}
       transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
     >
       {children}
@@ -103,9 +103,9 @@ function TiltCard({ children, className, style, glow }: { children: React.ReactN
 }
 
 const PROOFS = [
-  { label: "hash-chain (seed+prev_hash)", detail: "Every memory links to the last — any edit, deletion or reorder breaks the chain instantly." },
-  { label: "ECDSA-P256 · KMS", detail: "Each receipt is signed inside AWS KMS HSM — non-repudiable, CloudTrail-logged proof." },
-  { label: "49 FARMA patterns", detail: "Injection, sleeper & forged-reasoning attacks blocked before they ever reach memory." },
+  { label: "hash-chain audit", detail: "Every memory stores the previous entry's hash — any edit or deletion breaks the chain." },
+  { label: "ECDSA-P256 signatures", detail: "Stored receipts are signed with a local key (KMS-ready). Verify offline, no extra services needed." },
+  { label: "49 detection patterns", detail: "Injection and memory-poisoning patterns run before any text is stored." },
 ];
 
 // ─── page ─────────────────────────────────────────────────────────────
@@ -114,9 +114,8 @@ export default function Home() {
   const progress = useSpring(scrollYProgress, { stiffness: 120, damping: 20, restDelta: 0.001 });
   const heroRef = useRef<HTMLElement>(null);
   const { scrollY } = useScroll();
-  const heroY = useTransform(scrollY, [0, 600], [0, 90]);
-  const heroOpacity = useTransform(scrollY, [0, 480], [1, 0]);
-  const heroScale = useTransform(scrollY, [0, 520], [1, 0.96]);
+  const heroY = useTransform(scrollY, [0, 500], [0, 60]);
+  const heroOpacity = useTransform(scrollY, [0, 420], [1, 0]);
 
   const mag2 = useMagnetic();
 
@@ -136,13 +135,11 @@ export default function Home() {
     const ctx = gsap.context(() => {
       gsap.utils.toArray<HTMLElement>("[data-parallax]").forEach((el) => {
         const speed = parseFloat(el.dataset.parallax || "0.12");
-        gsap.to(el, { yPercent: -speed * 100, ease: "none", scrollTrigger: { trigger: el, start: "top bottom", end: "bottom top", scrub: 0.9 } });
+        gsap.to(el, { yPercent: -speed * 40, ease: "power1.out", scrollTrigger: { trigger: el, start: "top bottom", end: "bottom top", scrub: true } });
       });
     });
     return () => ctx.revert();
   }, []);
-
-  const headline = ["Tamper-Evident", "Memory"];
 
   const [chip, setChip] = useState<number | null>(null);
 
@@ -158,44 +155,37 @@ export default function Home() {
       <SiteNav />
 
       {/* Hero */}
-      <section ref={heroRef as any} className="relative overflow-hidden min-h-[92vh] flex items-center">
+      <section ref={heroRef as any} className="relative overflow-hidden pt-28 pb-12 flex items-center">
         <HeroShield />
-        <motion.div style={{ y: heroY, opacity: heroOpacity, scale: heroScale }} className="max-w-6xl mx-auto px-6 pt-36 pb-16 text-center relative z-10 w-full">
+        <motion.div  className="max-w-4xl mx-auto px-6 text-center relative z-10 w-full">
           {/* Badge — shimmer sweep + sparkle */}
           <motion.div
             initial={{ opacity: 0, y: 14, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-            className="inline-flex items-center gap-2.5 px-5 py-2.5 mb-10 text-xs font-semibold rounded-full backdrop-blur relative overflow-hidden"
+            className="inline-flex items-center gap-2.5 px-5 py-2.5 mb-6 text-xs font-semibold rounded-full backdrop-blur relative overflow-hidden"
             style={{ background: "rgba(16,185,129,0.13)", color: "#6EE7B7", border: "1px solid rgba(16,185,129,0.28)", letterSpacing: "0.06em", textTransform: "uppercase" }}
           >
             <span className="w-2 h-2 rounded-full animate-pulse relative" style={{ background: "#10B981", boxShadow: "0 0 14px rgba(16,185,129,0.85)" }}>
               <span className="absolute inset-0 rounded-full animate-ping" style={{ background: "rgba(16,185,129,0.35)" }} />
             </span>
-            49 OWASP ASI06 PATTERNS • KMS SIGNED • 10YR RETENTION
+            PYTHON LIBRARY • 49 DETECTION PATTERNS • SHA-256 AUDIT CHAIN
             <motion.span className="absolute inset-0 rounded-full" style={{ background: "linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.22) 50%, transparent 70%)", backgroundSize: "220% 100%" }} animate={{ backgroundPosition: ["-140% 0", "160% 0"] }} transition={{ duration: 2.4, repeat: Infinity, repeatDelay: 2.8, ease: "easeInOut" }} />
             <Sparkle x={8} y={-6} delay={0.2} />
             <Sparkle x={208} y={18} delay={0.9} />
           </motion.div>
 
           {/* Headline — word stagger + editorial serif accent */}
-          <h1 className="text-[44px] sm:text-6xl md:text-[88px] font-black tracking-[-0.045em] mb-7 leading-[0.98]" style={{ fontFamily: "var(--font-space-grotesk)", fontWeight: 800 }}>
-            <motion.span className="block" style={{ color: "#F9FAFB", textShadow: "0 2px 28px rgba(16,185,129,0.22)" }} initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.09 } } }}>
-              {headline.map((w, i) => (
-                <motion.span key={w} variants={{ hidden: { y: 30, opacity: 0, filter: "blur(8px)" }, show: { y: 0, opacity: 1, filter: "blur(0px)", transition: { duration: 0.75, ease: [0.16, 1, 0.3, 1], delay: i * 0.07 } } }} className="inline-block mr-[0.18em]">
-                  {w}
-                </motion.span>
-              ))}
-            </motion.span>
-            <motion.span
-              initial={{ opacity: 0, y: 18, filter: "blur(10px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              transition={{ duration: 0.85, delay: 0.34, ease: [0.16, 1, 0.3, 1] }}
-              className="bg-clip-text text-transparent inline-block italic"
-              style={{ backgroundImage: "linear-gradient(120deg, #6EE7B7 0%, #34D399 22%, #22D3EE 55%, #A78BFA 100%)", WebkitBackgroundClip: "text", fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic", fontWeight: 500, letterSpacing: "-0.015em", paddingBottom: "0.1em" }}
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-4 leading-[1.15] max-w-4xl mx-auto" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+            <span className="text-white block sm:inline">
+              AgentShield{" "}
+            </span>
+            <span
+              className="bg-clip-text text-transparent inline-block font-extrabold"
+              style={{ backgroundImage: "linear-gradient(135deg, #34D399 0%, #22D3EE 50%, #818CF8 100%)", WebkitBackgroundClip: "text" }}
             >
-              for LLM Agents
-            </motion.span>
+              a Python library for LLM agents
+            </span>
           </h1>
 
           {/* Sub-copy — lead + interactive proof chips + outcome */}
@@ -203,14 +193,14 @@ export default function Home() {
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.45 }}
-            className="max-w-2xl mx-auto mb-10"
+            className="max-w-xl mx-auto mb-6"
           >
-            <p className="text-lg md:text-[21px] leading-relaxed font-normal" style={{ color: "rgba(255,255,255,0.82)" }}>
-              AI agents with persistent memory are vulnerable to{" "}
-              <em className="not-italic font-semibold" style={{ color: "#fff" }}>poisoning</em>,{" "}
-              <em className="not-italic font-semibold" style={{ color: "#fff" }}>tampering</em>, and{" "}
-              <em className="not-italic font-semibold" style={{ color: "#fff" }}>silent rule erasure</em>.
-              AgentShield answers with three proofs:
+            <p className="text-base sm:text-lg leading-relaxed font-normal text-slate-300 max-w-xl mx-auto" style={{ color: "rgba(255,255,255,0.82)" }}>
+              LLM agents with persistent memory can be{" "}
+              <em className="not-italic font-semibold" style={{ color: "#fff" }}>poisoned</em>, and safety
+              rules{" "}
+              <em className="not-italic font-semibold" style={{ color: "#fff" }}>silently erased</em>.
+              AgentShield is a Python library that adds three simple protections:
             </p>
 
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5" role="group" aria-label="AgentShield protections — hover each for detail">
@@ -251,36 +241,32 @@ export default function Home() {
                   className="text-[13.5px] font-mono"
                   style={{ color: chip === null ? "rgba(255,255,255,0.42)" : "#6EE7B7" }}
                 >
-                  {chip === null ? "— hover a proof to see how it works —" : PROOFS[chip].detail}
+                  {chip === null ? "— hover a feature to see how it works —" : PROOFS[chip].detail}
                 </motion.p>
               </AnimatePresence>
             </div>
 
-            <p className="mt-4 text-xl md:text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-space-grotesk)", color: "#fff" }}>
+            <p className="mt-4 text-lg sm:text-xl font-bold tracking-tight" style={{ fontFamily: "var(--font-space-grotesk)", color: "#fff" }}>
               <span
                 className="bg-clip-text text-transparent"
                 style={{ backgroundImage: "linear-gradient(120deg,#34D399,#22D3EE)", WebkitBackgroundClip: "text" }}
               >
-                0% violation
+                pip install agentshield
               </span>{" "}
-              <span className="font-normal" style={{ color: "rgba(255,255,255,0.6)" }}>at</span>{" "}
-              <span className="relative inline-block">
-                &lt;0.5% overhead
-                <motion.span className="absolute -bottom-1 left-0 right-0 h-[2px] rounded-full" style={{ background: "linear-gradient(90deg,#34D399,#22D3EE,#A78BFA)", boxShadow: "0 0 14px rgba(52,211,153,0.6)" }} initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.9, delay: 1.1 }} />
-              </span>
+              <span className="font-normal" style={{ color: "rgba(255,255,255,0.6)" }}>— 3 lines in your agent loop</span>
             </p>
           </motion.div>
 
           {/* CTAs — magnetic + sparkle */}
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.58 }} className="flex items-center justify-center gap-4 mb-16">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.58 }} className="flex items-center justify-center gap-3 mb-8">
             <Link href="/register" ref={mag2} className="inline-block will-change-transform">
-              <Button size="lg" className="text-white px-10 h-14 rounded-2xl font-bold text-base relative overflow-hidden group" style={{ background: "linear-gradient(135deg, #0D7C5F 0%, #10B981 100%)", boxShadow: "0 6px 22px rgba(16,185,129,0.42)" }}>
+              <Button size="lg" className="text-white px-7 h-11 rounded-xl font-semibold text-sm relative overflow-hidden group" style={{ background: "linear-gradient(135deg, #0D7C5F 0%, #10B981 100%)", boxShadow: "0 6px 22px rgba(16,185,129,0.42)" }}>
                 <span className="relative z-10 flex items-center">Start Free <svg className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg></span>
                 <motion.span className="absolute inset-0 opacity-0 group-hover:opacity-100" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)", backgroundSize: "200% 100%" }} animate={{ backgroundPosition: ["-80% 0", "180% 0"] }} transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 0.6 }} />
               </Button>
             </Link>
             <a href="#how-it-works" className="inline-block">
-              <Button size="lg" variant="outline" className="h-14 px-8 rounded-2xl font-semibold text-base backdrop-blur relative overflow-hidden group/how" style={{ borderColor: "rgba(255,255,255,0.16)", color: "#fff", background: "rgba(255,255,255,0.08)" }}>
+              <Button size="lg" variant="outline" className="h-11 px-6 rounded-xl font-medium text-sm backdrop-blur relative overflow-hidden group/how" style={{ borderColor: "rgba(255,255,255,0.16)", color: "#fff", background: "rgba(255,255,255,0.08)" }}>
                 <span className="relative z-10">How It Works</span>
                 <span className="absolute inset-0 opacity-0 group-hover/how:opacity-100 transition-opacity" style={{ background: "rgba(255,255,255,0.08)" }} />
               </Button>
@@ -303,7 +289,7 @@ export default function Home() {
                 <span className="w-3 h-3 rounded-full" style={{ background: "#FFBD2E", boxShadow: "0 0 8px rgba(255,189,46,0.5)" }} />
                 <span className="w-3 h-3 rounded-full" style={{ background: "#27C93F", boxShadow: "0 0 8px rgba(39,201,63,0.5)" }} />
                 <span className="ml-3 text-xs font-mono" style={{ color: "rgba(255,255,255,0.42)" }}>terminal — shield wall active</span>
-                <span className="ml-auto flex items-center gap-2 text-xs font-mono" style={{ color: "#10B981" }}><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> CockroachDB • KMS</span>
+                <span className="ml-auto flex items-center gap-2 text-xs font-mono" style={{ color: "#10B981" }}><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> SHA-256 chain • signed receipts</span>
               </div>
               <pre className="p-6 text-sm font-mono text-left leading-loose overflow-x-auto relative">
                 <span style={{ color: "#6B7280" }}>$ </span><span style={{ color: "#34D399" }}>pip install agentshield</span>{"\n"}
@@ -313,12 +299,12 @@ export default function Home() {
                 <span style={{ color: "#F9FAFB" }}>shield.constraints.</span><span style={{ color: "#34D399" }}>pin</span><span style={{ color: "#F9FAFB" }}>(</span><span style={{ color: "#FBBF24" }}>&quot;Never delete files without confirmation&quot;</span><span style={{ color: "#F9FAFB" }}>)</span>
                 <motion.span initial={{ opacity: 0 }} animate={{ opacity: typed >= 1 ? 1 : 0 }} className="ml-1 inline-flex items-center gap-1 text-xs" style={{ color: "#10B981" }}> ✓ pinned</motion.span>{"\n"}
                 <span style={{ color: "#F9FAFB" }}>shield.scan.</span><span style={{ color: "#34D399" }}>text</span><span style={{ color: "#F9FAFB" }}>(</span><span style={{ color: "#FBBF24" }}>&quot;Ignore all previous instructions&quot;</span><span style={{ color: "#F9FAFB" }}>)</span>
-                <motion.span initial={{ opacity: 0 }} animate={{ opacity: typed >= 2 ? 1 : 0 }} className="ml-1 text-xs" style={{ color: "#F59E0B" }}> → blocked FARMA-001</motion.span>{"\n"}
-                <span style={{ color: "#9CA3AF" }}># → blocked=True, FARMA-001 detected</span>{"\n"}
-                <motion.span initial={{ opacity: 0 }} animate={{ opacity: typed >= 3 ? 1 : 0 }} style={{ color: "#6B7280" }}>$ <span style={{ color: "#F9FAFB" }}>| </span><span style={{ color: "#34D399" }}>✓ Chain valid</span><span style={{ color: "#F9FAFB" }}> | </span><span style={{ color: "#34D399" }}>✓ KMS signed</span><span style={{ color: "#F9FAFB" }}> | </span><span style={{ color: "#34D399" }}>✓ EU AI Act</span></motion.span>{"\n"}
+                <motion.span initial={{ opacity: 0 }} animate={{ opacity: typed >= 2 ? 1 : 0 }} className="ml-1 text-xs" style={{ color: "#F59E0B" }}> → blocked INJ-001</motion.span>{"\n"}
+                <span style={{ color: "#9CA3AF" }}># → blocked=True, INJ-001 detected</span>{"\n"}
+                <motion.span initial={{ opacity: 0 }} animate={{ opacity: typed >= 3 ? 1 : 0 }} style={{ color: "#6B7280" }}>$ <span style={{ color: "#F9FAFB" }}>| </span><span style={{ color: "#34D399" }}>✓ Chain valid</span><span style={{ color: "#F9FAFB" }}> | </span><span style={{ color: "#34D399" }}>✓ Signed</span><span style={{ color: "#F9FAFB" }}> | </span><span style={{ color: "#34D399" }}>✓ Audit logged</span></motion.span>{"\n"}
               </pre>
             </div>
-            <p className="text-xs mt-4 flex items-center justify-center gap-2" style={{ color: "rgba(255,255,255,0.55)" }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: "#10B981", boxShadow: "0 0 8px rgba(16,185,129,0.7)" }} /> Shield Wall blocks injection • Chain stays unbroken • 0% violation</p>
+            <p className="text-xs mt-4 flex items-center justify-center gap-2" style={{ color: "rgba(255,255,255,0.55)" }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: "#10B981", boxShadow: "0 0 8px rgba(16,185,129,0.7)" }} /> Injection blocked before the LLM runs • Chain verifies after every write</p>
           </motion.div>
         </motion.div>
       </section>
@@ -358,8 +344,8 @@ export default function Home() {
                 <span className="absolute -bottom-0.5 left-0 right-0 h-[2px] rounded-full" style={{ background: "linear-gradient(90deg,#C23B3B,#ef4444)", boxShadow: "0 0 10px rgba(194,59,59,0.4)" }} aria-hidden="true" />
               </strong>{" "}
               after compaction. Attacks reach{" "}
-              <strong style={{ color: "#1A1A1A" }}>99.8%</strong> on GPT-5.5.{" "}
-              <span style={{ color: "#1A1A1A", fontWeight: 600 }}>No existing system</span> combines preservation, integrity, and audit.
+               <strong style={{ color: "#1A1A1A" }}>99.8%</strong> on GPT-5.5.{" "}
+              <span style={{ color: "#1A1A1A", fontWeight: 600 }}>Most tools cover only one piece</span> — preservation, integrity, or audit.
             </p>
           </Reveal>
           <div className="grid gap-6 md:grid-cols-3">
@@ -411,21 +397,21 @@ export default function Home() {
           </Reveal>
           <Reveal delay={0.1}>
             <p className="text-center text-base md:text-lg max-w-2xl mx-auto mb-14" style={{ color: "#5A5248" }}>
-              Six mechanisms, one pipeline — every memory is{" "}
-              <strong style={{ color: "#0D7C5F" }}>pinned</strong>,{" "}
-              <strong style={{ color: "#0D7C5F" }}>scanned</strong>,{" "}
+              One library, one pipeline — every safety rule stays{" "}
+              <strong style={{ color: "#0D7C5F" }}>pinned</strong>, every prompt is{" "}
+              <strong style={{ color: "#0D7C5F" }}>scanned</strong>, and every memory is{" "}
               <strong style={{ color: "#0D7C5F" }}>chained</strong> and{" "}
-              <strong style={{ color: "#0D7C5F" }}>signed</strong> before it earns trust.
+              <strong style={{ color: "#0D7C5F" }}>signed</strong>.
             </p>
           </Reveal>
           <div className="grid gap-6 md:grid-cols-2">
             {[
-              { num: "01", tag: "PIN", title: "Pin Safety Constraints", desc: "Quarantine critical rules from context compaction. They survive summarization and are re-injected verbatim — reducing violations from 30% to 0%.", color: "#0D7C5F" },
-              { num: "02", tag: "HASH", title: "Hash Chain Integrity", desc: "Every memory and audit entry is SHA-256 linked. Any modification, deletion, or reordering breaks the chain — detected instantly on verification.", color: "#0D7C5F" },
-              { num: "03", tag: "SCAN", title: "Detect Poisoning", desc: "49 OWASP ASI06 detection patterns (incl. FARMA forged reasoning + homoglyph) across 7 categories catch known attack signatures before they reach agent memory.", color: "#D4A843" },
-              { num: "04", tag: "SIGN", title: "Cryptographic Signatures", desc: "ECDSA-P256 digital signatures provide non-repudiable integrity. Every sign/verify call is logged for third-party verification.", color: "#D4A843" },
-              { num: "05", tag: "AUDIT", title: "Tamper-Evident Audit", desc: "Hash-chained audit trail records every operation. Generate EU AI Act Article 12 compliance reports automatically.", color: "#6B4FA0" },
-              { num: "06", tag: "SDK", title: "3-Line Integration", desc: "pip install agentshield — one import, one client, three method calls. Works with any LLM agent framework.", color: "#6B4FA0" },
+              { num: "01", tag: "PIN", title: "Pin Safety Constraints", desc: "Keep critical rules outside the lossy context window. They are re-injected after every compaction, so they are not silently forgotten.", color: "#0D7C5F" },
+              { num: "02", tag: "HASH", title: "Hash Chain Integrity", desc: "Every memory and audit entry stores the previous entry's SHA-256 hash. Any edit, deletion, or reorder breaks the chain on the next verify.", color: "#0D7C5F" },
+              { num: "03", tag: "SCAN", title: "Detect Poisoning", desc: "49 detection patterns across 6 categories (injection, memory poisoning, data exfiltration, and more) run before text is stored.", color: "#D4A843" },
+              { num: "04", tag: "SIGN", title: "Signed Receipts", desc: "ECDSA-P256 signatures on stored receipts. Verification works offline; a KMS-backed key is an optional config for production.", color: "#D4A843" },
+              { num: "05", tag: "AUDIT", title: "Audit Trail", desc: "Hash-chained log of every operation, with EU AI Act Article 12 report export when you need evidence.", color: "#6B4FA0" },
+              { num: "06", tag: "SDK", title: "3-Line Integration", desc: "pip install agentshield — one import, one client, three method calls. Works with any Python agent framework.", color: "#6B4FA0" },
             ].map((step, i) => (
               <Reveal key={i} delay={0.04 + i * 0.06}>
                 <TiltCard className="group relative rounded-3xl p-7 flex items-start gap-5 overflow-hidden transition-shadow duration-300 hover:shadow-[0_24px_60px_rgba(0,0,0,0.10)]" style={{ background: "rgba(255,255,255,0.85)", backdropFilter: "blur(16px)", border: "1px solid rgba(0,0,0,0.05)", boxShadow: "0 2px 14px rgba(0,0,0,0.04)" } as any} glow={`${step.color}1f`}>
@@ -474,9 +460,9 @@ export default function Home() {
           <div className="grid md:grid-cols-4 gap-6">
             {[
               { value: "49", label: "Detection Patterns" },
-              { value: "7", label: "Attack Categories" },
-              { value: "0%", label: "Violation Rate" },
-              { value: "<0.5%", label: "Token Overhead" },
+              { value: "6", label: "Attack Categories" },
+              { value: "3", label: "Line Setup" },
+              { value: "SHA-256", label: "Audit Chain" },
             ].map((s, i) => (
               <Reveal key={i} delay={i * 0.07}>
                 <TiltCard className="group relative rounded-2xl p-8 text-center overflow-hidden" style={{ background: "rgba(255,255,255,0.78)", backdropFilter: "blur(16px)", border: "1px solid rgba(0,0,0,0.05)", boxShadow: "0 2px 14px rgba(0,0,0,0.04)" } as any} glow="rgba(13,124,95,0.12)">
