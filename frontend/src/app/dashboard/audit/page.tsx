@@ -5,6 +5,12 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, ApiError } from "@/lib/api";
 
+const BLACK = "#000000";
+const SHADOW = `6px 6px 0px ${BLACK}`;
+const SHADOW_SM = `4px 4px 0px ${BLACK}`;
+const FONT_HEAD = "var(--font-space-grotesk)";
+const FONT_MONO = "var(--font-geist-mono)";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AuditDetails {
   memory_type?: string;
@@ -49,53 +55,246 @@ interface HealthSigning {
 
 // ─── Color maps ───────────────────────────────────────────────────────────────
 const EVENT_META: Record<string, { bg: string; fg: string; border: string; dot: string; label: string }> = {
-  constraint_pinned:  { bg: "rgba(16,185,129,0.06)",  fg: "#059669", border: "rgba(16,185,129,0.15)", dot: "#059669",  label: "CONSTRAINT" },
-  memory_stored:      { bg: "rgba(139,92,246,0.06)",  fg: "#7C3AED", border: "rgba(139,92,246,0.15)", dot: "#7C3AED",  label: "MEMORY" },
-  pattern_detected:   { bg: "rgba(239,68,68,0.06)",   fg: "#DC2626", border: "rgba(239,68,68,0.15)",  dot: "#DC2626",  label: "THREAT" },
-  auth_login:         { bg: "rgba(56,189,248,0.06)",  fg: "#0284C7", border: "rgba(56,189,248,0.15)", dot: "#0284C7",  label: "AUTH" },
-  auth_register:      { bg: "rgba(56,189,248,0.06)",  fg: "#0284C7", border: "rgba(56,189,248,0.15)", dot: "#0284C7",  label: "AUTH" },
-  auth_logout:        { bg: "rgba(56,189,248,0.06)",  fg: "#0284C7", border: "rgba(56,189,248,0.15)", dot: "#0284C7",  label: "AUTH" },
-  memory_rejected:    { bg: "rgba(239,68,68,0.06)",   fg: "#DC2626", border: "rgba(239,68,68,0.15)",  dot: "#DC2626",  label: "BLOCKED" },
-  scan:               { bg: "rgba(245,158,11,0.06)",  fg: "#D97706", border: "rgba(245,158,11,0.15)", dot: "#D97706",  label: "SCAN" },
+  constraint_pinned:  { bg: "#2DD4A0", fg: "#000", border: BLACK, dot: "#000", label: "CONSTRAINT" },
+  memory_stored:      { bg: "#C084FC", fg: "#000", border: BLACK, dot: "#000", label: "MEMORY" },
+  pattern_detected:   { bg: "#FF4D4D", fg: "#000", border: BLACK, dot: "#000", label: "THREAT" },
+  auth_login:         { bg: "#4D9FFF", fg: "#000", border: BLACK, dot: "#000", label: "AUTH" },
+  auth_register:      { bg: "#4D9FFF", fg: "#000", border: BLACK, dot: "#000", label: "AUTH" },
+  auth_logout:        { bg: "#4D9FFF", fg: "#000", border: BLACK, dot: "#000", label: "AUTH" },
+  memory_rejected:    { bg: "#FF4D4D", fg: "#000", border: BLACK, dot: "#000", label: "BLOCKED" },
+  scan:               { bg: "#FACC15", fg: "#000", border: BLACK, dot: "#000", label: "SCAN" },
+  chat_turn:          { bg: "#C084FC", fg: "#000", border: BLACK, dot: "#000", label: "CHAT" },
 };
 function getEventMeta(type: string) {
-  return EVENT_META[type] || { bg: "rgba(26,26,26,0.04)", fg: "#7A7164", border: "rgba(26,26,26,0.08)", dot: "#7A7164", label: type.toUpperCase() };
+  return EVENT_META[type] || { bg: "#E2E8F0", fg: "#000", border: BLACK, dot: "#000", label: type.toUpperCase() };
 }
 
 const SEVERITY_META: Record<string, { bg: string; fg: string }> = {
-  critical: { bg: "rgba(239,68,68,0.1)",  fg: "#DC2626" },
-  high:     { bg: "rgba(249,115,22,0.1)", fg: "#EA580C" },
-  medium:   { bg: "rgba(245,158,11,0.1)", fg: "#B45309" },
-  low:      { bg: "rgba(16,185,129,0.1)", fg: "#059669" },
+  critical: { bg: "#FF4D4D", fg: "#000" },
+  high:     { bg: "#FF8A4D", fg: "#000" },
+  medium:   { bg: "#FACC15", fg: "#000" },
+  low:      { bg: "#2DD4A0", fg: "#000" },
 };
 
 function getSeverityStyle(sev?: string) {
-  return SEVERITY_META[sev?.toLowerCase() || ""] || { bg: "rgba(26,26,26,0.05)", fg: "#7A7164" };
+  return SEVERITY_META[sev?.toLowerCase() || ""] || { bg: "#E2E8F0", fg: "#000" };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function Skeleton({ className }: { className?: string }) {
-  return <div className={`animate-pulse rounded-lg bg-[#E6E0D4] ${className}`} />;
+function Skeleton({ height }: { height: number }) {
+  return (
+    <div
+      style={{
+        height,
+        background: "#E2E8F0",
+        border: `3px solid ${BLACK}`,
+        borderRadius: "12px",
+        boxShadow: SHADOW_SM,
+        animation: "pulse 1.5s ease-in-out infinite",
+      }}
+    />
+  );
 }
 
-function Badge({ label, bg, fg }: { label: string; bg: string; fg: string }) {
+function Chip({ label, bg, fg = "#000", onClick, title }: { label: string; bg: string; fg?: string; onClick?: () => void; title?: string }) {
+  const Tag = onClick ? "button" : "span";
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold font-mono tracking-widest uppercase"
-      style={{ background: bg, color: fg }}>
+    <Tag
+      onClick={onClick}
+      title={title}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "5px",
+        background: bg,
+        color: fg,
+        border: `2px solid ${BLACK}`,
+        borderRadius: "6px",
+        padding: "3px 9px",
+        fontFamily: FONT_HEAD,
+        fontSize: "10px",
+        fontWeight: 900,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        boxShadow: `2px 2px 0px ${BLACK}`,
+        whiteSpace: "nowrap",
+        cursor: onClick ? "pointer" : "default",
+        flexShrink: 0,
+      }}
+    >
       {label}
-    </span>
+    </Tag>
   );
 }
 
 function HashChip({ hash }: { hash: string | null | undefined }) {
-  if (!hash) return <span className="text-muted-foreground font-medium font-mono text-[10px]">—</span>;
+  if (!hash) return <span style={{ fontFamily: FONT_MONO, fontSize: "10px", fontWeight: 700, color: "#475569" }}>—</span>;
   return (
-    <span className="font-mono text-[10px] text-muted-foreground font-medium hover:text-foreground font-medium transition-colors cursor-default" title={hash}>
+    <span style={{ fontFamily: FONT_MONO, fontSize: "10px", fontWeight: 700, color: "#475569", cursor: "default" }} title={hash}>
       {hash.slice(0, 8)}…{hash.slice(-4)}
     </span>
   );
 }
+
+function NeoButton({
+  children,
+  onClick,
+  disabled,
+  variant = "primary",
+  size = "md",
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: "primary" | "secondary" | "danger" | "ghost";
+  size?: "sm" | "md";
+}) {
+  const palette =
+    variant === "primary"
+      ? { bg: "#2DD4A0", fg: "#000" }
+      : variant === "danger"
+      ? { bg: "#FF4D4D", fg: "#000" }
+      : variant === "ghost"
+      ? { bg: "transparent", fg: "#000" }
+      : { bg: "#FFFFFF", fg: "#000" };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "7px",
+        fontFamily: FONT_HEAD,
+        fontWeight: 900,
+        fontSize: size === "sm" ? "12px" : "13px",
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        color: palette.fg,
+        background: palette.bg,
+        border: `3px solid ${BLACK}`,
+        borderRadius: "9px",
+        boxShadow: variant === "ghost" ? "none" : SHADOW_SM,
+        padding: size === "sm" ? "7px 12px" : "10px 16px",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.55 : 1,
+        whiteSpace: "nowrap",
+        transform: "translate(-1px, -1px)",
+        transition: "transform 100ms, box-shadow 100ms",
+      }}
+      onMouseDown={(e) => {
+        if (disabled) return;
+        (e.currentTarget as HTMLButtonElement).style.transform = "translate(2px, 2px)";
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = "1px 1px 0px #000";
+      }}
+      onMouseUp={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.transform = "translate(-1px, -1px)";
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = SHADOW_SM;
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.transform = "translate(-1px, -1px)";
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = variant === "ghost" ? "none" : SHADOW_SM;
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Panel({
+  title,
+  description,
+  accent,
+  action,
+  children,
+}: {
+  title: string;
+  description?: string;
+  accent: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "#FFFFFF",
+        border: `3px solid ${BLACK}`,
+        borderRadius: "16px",
+        boxShadow: SHADOW,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "12px",
+          flexWrap: "wrap",
+          padding: "16px 20px",
+          borderBottom: `3px solid ${BLACK}`,
+          background: accent,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+          <span style={{ width: "14px", height: "14px", borderRadius: "50%", background: BLACK, flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ fontFamily: FONT_HEAD, fontSize: "18px", fontWeight: 900, color: BLACK, margin: 0, letterSpacing: "-0.01em" }}>
+              {title}
+            </h3>
+            {description ? (
+              <p style={{ margin: "2px 0 0 0", fontSize: "13px", fontWeight: 700, color: BLACK, opacity: 0.65 }}>{description}</p>
+            ) : null}
+          </div>
+        </div>
+        {action}
+      </div>
+      <div style={{ padding: "20px" }}>{children}</div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, accent }: { label: string; value: React.ReactNode; accent: string }) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: `3px solid ${BLACK}`,
+        borderRadius: "14px",
+        boxShadow: SHADOW,
+        padding: "16px",
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+        <span style={{ width: "12px", height: "12px", borderRadius: "50%", background: accent, border: `2px solid ${BLACK}`, flexShrink: 0 }} />
+        <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>
+          {label}
+        </span>
+      </div>
+      <div style={{ fontFamily: FONT_HEAD, fontSize: "20px", fontWeight: 900, letterSpacing: "-0.02em", color: BLACK, lineHeight: 1.15, wordBreak: "break-word" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  border: `3px solid ${BLACK}`,
+  borderRadius: "9px",
+  background: "#fff",
+  padding: "10px 12px",
+  fontSize: "14px",
+  fontWeight: 600,
+  color: BLACK,
+  outline: "none",
+  boxShadow: `2px 2px 0px ${BLACK}`,
+  fontFamily: FONT_MONO,
+};
 
 function EventRow({ entry, expanded, onToggle }: { entry: AuditEntry; expanded: boolean; onToggle: () => void }) {
   const meta = getEventMeta(entry.event_type);
@@ -105,46 +304,46 @@ function EventRow({ entry, expanded, onToggle }: { entry: AuditEntry; expanded: 
 
   return (
     <div
-      className="group border-b border-border last:border-0 transition-colors hover:bg-[#E4DED1] cursor-pointer"
+      style={{ borderBottom: `2px solid ${BLACK}`, cursor: "pointer" }}
       onClick={onToggle}
     >
       {/* Main row */}
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 16px" }}>
         {/* Dot + event type */}
-        <div className="flex items-center gap-2.5 min-w-[140px]">
-          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: meta.dot }} />
-          <Badge label={meta.label} bg={meta.bg} fg={meta.fg} />
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: "130px" }}>
+          <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: BLACK, flexShrink: 0 }} />
+          <Chip label={meta.label} bg={meta.bg} fg={meta.fg} />
         </div>
 
         {/* Action */}
-        <span className="text-xs text-foreground font-medium flex-1 truncate hidden sm:block">
+        <span style={{ flex: 1, minWidth: 0, fontSize: "13px", fontWeight: 700, color: BLACK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {entry.action}{d?.memory_type ? ` · ${d.memory_type}` : ""}
           {d?.constraint_type ? ` · ${d.constraint_type}` : ""}
         </span>
 
         {/* Blocked / severity */}
-        <div className="hidden md:flex items-center gap-2 shrink-0">
+        <div style={{ display: "none", alignItems: "center", gap: "8px", flexShrink: 0 }} className="md:flex">
           {isBlocked && (
-            <Badge label="BLOCKED" bg="rgba(239,68,68,0.1)" fg="#DC2626" />
+            <Chip label="BLOCKED" bg="#FF4D4D" />
           )}
           {severity && (
-            <Badge label={severity} bg={getSeverityStyle(severity).bg} fg={getSeverityStyle(severity).fg} />
+            <Chip label={severity} bg={getSeverityStyle(severity).bg} fg={getSeverityStyle(severity).fg} />
           )}
         </div>
 
         {/* Hash */}
-        <div className="hidden lg:block shrink-0">
+        <div style={{ display: "none" }} className="lg:block">
           <HashChip hash={entry.entry_hash} />
         </div>
 
         {/* Timestamp */}
-        <span className="text-[10px] font-mono text-muted-foreground font-medium shrink-0 ml-auto pl-2">
+        <span style={{ fontFamily: FONT_MONO, fontSize: "11px", fontWeight: 700, color: "#475569", flexShrink: 0, marginLeft: "auto", paddingLeft: "8px" }}>
           {new Date(entry.recorded_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
         </span>
 
         {/* Expand icon */}
         <svg
-          className={`w-3 h-3 text-muted-foreground font-medium shrink-0 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+          style={{ width: "14px", height: "14px", color: "#475569", flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 200ms" }}
           fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -153,75 +352,75 @@ function EventRow({ entry, expanded, onToggle }: { entry: AuditEntry; expanded: 
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="px-4 pb-4 pt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-[11px] border-t border-border animate-fade-in">
-          <div className="space-y-1">
-            <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Event ID</div>
-            <div className="font-mono text-foreground font-medium break-all">{entry.entry_id}</div>
+        <div style={{ padding: "0 16px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", fontSize: "12px", borderTop: `2px solid ${BLACK}`, paddingTop: "12px" }}>
+          <div>
+            <div style={{ fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "4px" }}>Event ID</div>
+            <div style={{ fontFamily: FONT_MONO, fontWeight: 700, color: BLACK, wordBreak: "break-all" }}>{entry.entry_id}</div>
           </div>
-          <div className="space-y-1">
-            <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Actor</div>
-            <div className="font-mono text-foreground font-medium break-all">{entry.actor || "—"}</div>
+          <div>
+            <div style={{ fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "4px" }}>Actor</div>
+            <div style={{ fontFamily: FONT_MONO, fontWeight: 700, color: BLACK, wordBreak: "break-all" }}>{entry.actor || "—"}</div>
           </div>
-          <div className="space-y-1">
-            <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Target</div>
-            <div className="font-mono text-foreground font-medium break-all">{entry.target || "—"}</div>
+          <div>
+            <div style={{ fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "4px" }}>Target</div>
+            <div style={{ fontFamily: FONT_MONO, fontWeight: 700, color: BLACK, wordBreak: "break-all" }}>{entry.target || "—"}</div>
           </div>
-          <div className="space-y-1">
-            <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Timestamp</div>
-            <div className="font-mono text-foreground font-medium">{new Date(entry.recorded_at).toISOString()}</div>
+          <div>
+            <div style={{ fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "4px" }}>Timestamp</div>
+            <div style={{ fontFamily: FONT_MONO, fontWeight: 700, color: BLACK }}>{new Date(entry.recorded_at).toISOString()}</div>
           </div>
-          <div className="space-y-1">
-            <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Entry Hash (SHA-256)</div>
-            <div className="font-mono text-muted-foreground break-all text-[10px]">{entry.entry_hash || "—"}</div>
+          <div>
+            <div style={{ fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "4px" }}>Entry Hash (SHA-256)</div>
+            <div style={{ fontFamily: FONT_MONO, fontWeight: 700, color: "#475569", wordBreak: "break-all", fontSize: "11px" }}>{entry.entry_hash || "—"}</div>
           </div>
-          <div className="space-y-1">
-            <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Previous Hash</div>
-            <div className="font-mono text-muted-foreground break-all text-[10px]">{entry.previous_hash || "—"}</div>
+          <div>
+            <div style={{ fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "4px" }}>Previous Hash</div>
+            <div style={{ fontFamily: FONT_MONO, fontWeight: 700, color: "#475569", wordBreak: "break-all", fontSize: "11px" }}>{entry.previous_hash || "—"}</div>
           </div>
           {d && Object.keys(d).length > 0 && (
-            <div className="col-span-full space-y-1">
-              <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Details</div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div style={{ fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "8px" }}>Details</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px" }}>
                 {d.risk_score !== undefined && (
-                  <div className="rounded px-2.5 py-1.5 bg-[#E6E0D4] border border-[rgba(26,26,26,0.13)]">
-                    <div className="text-[8px] text-muted-foreground font-medium uppercase tracking-widest mb-0.5">Risk Score</div>
-                    <div className={`font-bold text-xs ${Number(d.risk_score) >= 20 ? "text-red-600" : Number(d.risk_score) >= 10 ? "text-amber-600" : "text-green-600"}`}>
+                  <div style={{ padding: "8px 10px", background: "#F1F5F9", border: `2px solid ${BLACK}`, borderRadius: "8px", boxShadow: `2px 2px 0px ${BLACK}` }}>
+                    <div style={{ fontFamily: FONT_HEAD, fontSize: "9px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "3px" }}>Risk Score</div>
+                    <div style={{ fontFamily: FONT_HEAD, fontWeight: 900, fontSize: "13px", color: Number(d.risk_score) >= 20 ? "#DC2626" : Number(d.risk_score) >= 10 ? "#B45309" : "#059669" }}>
                       {d.risk_score}
                     </div>
                   </div>
                 )}
                 {d.max_severity && (
-                  <div className="rounded px-2.5 py-1.5 bg-[#E6E0D4] border border-[rgba(26,26,26,0.13)]">
-                    <div className="text-[8px] text-muted-foreground font-medium uppercase tracking-widest mb-0.5">Severity</div>
-                    <div className="font-bold text-xs" style={{ color: getSeverityStyle(d.max_severity).fg }}>{d.max_severity}</div>
+                  <div style={{ padding: "8px 10px", background: "#F1F5F9", border: `2px solid ${BLACK}`, borderRadius: "8px", boxShadow: `2px 2px 0px ${BLACK}` }}>
+                    <div style={{ fontFamily: FONT_HEAD, fontSize: "9px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "3px" }}>Severity</div>
+                    <div style={{ fontFamily: FONT_HEAD, fontWeight: 900, fontSize: "13px", color: BLACK }}>{d.max_severity}</div>
                   </div>
                 )}
                 {d.patterns_matched !== undefined && (
-                  <div className="rounded px-2.5 py-1.5 bg-[#E6E0D4] border border-[rgba(26,26,26,0.13)]">
-                    <div className="text-[8px] text-muted-foreground font-medium uppercase tracking-widest mb-0.5">Patterns Matched</div>
-                    <div className="font-bold text-xs text-foreground font-medium">{d.patterns_matched}</div>
+                  <div style={{ padding: "8px 10px", background: "#F1F5F9", border: `2px solid ${BLACK}`, borderRadius: "8px", boxShadow: `2px 2px 0px ${BLACK}` }}>
+                    <div style={{ fontFamily: FONT_HEAD, fontSize: "9px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "3px" }}>Patterns Matched</div>
+                    <div style={{ fontFamily: FONT_HEAD, fontWeight: 900, fontSize: "13px", color: BLACK }}>{d.patterns_matched}</div>
                   </div>
                 )}
                 {d.blocked !== undefined && (
-                  <div className="rounded px-2.5 py-1.5 bg-[#E6E0D4] border border-[rgba(26,26,26,0.13)]">
-                    <div className="text-[8px] text-muted-foreground font-medium uppercase tracking-widest mb-0.5">Outcome</div>
-                    <div className={`font-bold text-xs ${d.blocked ? "text-red-600" : "text-green-600"}`}>
+                  <div style={{ padding: "8px 10px", background: "#F1F5F9", border: `2px solid ${BLACK}`, borderRadius: "8px", boxShadow: `2px 2px 0px ${BLACK}` }}>
+                    <div style={{ fontFamily: FONT_HEAD, fontSize: "9px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "3px" }}>Outcome</div>
+                    <div style={{ fontFamily: FONT_HEAD, fontWeight: 900, fontSize: "13px", color: d.blocked ? "#DC2626" : "#059669" }}>
                       {d.blocked ? "BLOCKED" : "ALLOWED"}
                     </div>
                   </div>
                 )}
                 {d.memory_type && (
-                  <div className="rounded px-2.5 py-1.5 bg-[#E6E0D4] border border-[rgba(26,26,26,0.13)]">
-                    <div className="text-[8px] text-muted-foreground font-medium uppercase tracking-widest mb-0.5">Memory Type</div>
-                    <div className="font-bold text-xs text-purple-600">{d.memory_type}</div>
+                  <div style={{ padding: "8px 10px", background: "#F1F5F9", border: `2px solid ${BLACK}`, borderRadius: "8px", boxShadow: `2px 2px 0px ${BLACK}` }}>
+                    <div style={{ fontFamily: FONT_HEAD, fontSize: "9px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "3px" }}>Memory Type</div>
+                    <div style={{ fontFamily: FONT_HEAD, fontWeight: 900, fontSize: "13px", color: "#7C3AED" }}>{d.memory_type}</div>
                   </div>
                 )}
                 {d.categories && d.categories.length > 0 && (
-                  <div className="rounded px-2.5 py-1.5 bg-[#E6E0D4] border border-[rgba(26,26,26,0.13)] col-span-full">
-                    <div className="text-[8px] text-muted-foreground font-medium uppercase tracking-widest mb-0.5">Categories</div>
-                    <div className="flex flex-wrap gap-1 mt-1">
+                  <div style={{ gridColumn: "1 / -1", padding: "8px 10px", background: "#F1F5F9", border: `2px solid ${BLACK}`, borderRadius: "8px", boxShadow: `2px 2px 0px ${BLACK}` }}>
+                    <div style={{ fontFamily: FONT_HEAD, fontSize: "9px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "6px" }}>Categories</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                       {d.categories.map((cat) => (
-                        <Badge key={cat} label={cat} bg="rgba(239,68,68,0.08)" fg="#DC2626" />
+                        <Chip key={cat} label={cat} bg="#FF4D4D" />
                       ))}
                     </div>
                   </div>
@@ -257,7 +456,12 @@ export default function AuditPage() {
   // Expanded rows
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpand = (id: string) =>
-    setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
 
   // Stream
   const [streamConnected, setStreamConnected] = useState(false);
@@ -278,15 +482,15 @@ export default function AuditPage() {
   const [filterType, setFilterType] = useState("all");
 
   // ── Load core data ────────────────────────────────────────────────────────
-  const load = useCallback(async () => {
+  const load = useCallback(async (forceRefresh = false) => {
     if (!token) return;
     setFetching(true);
     setError(null);
     try {
       const [timeline, verify, health] = await Promise.allSettled([
-        api.auditTimeline(token),
-        api.auditVerify(token),
-        api.health(),
+        api.auditTimeline(token, forceRefresh),
+        api.auditVerify(token, forceRefresh),
+        api.health(forceRefresh),
       ]);
 
       if (timeline.status === "fulfilled") {
@@ -315,7 +519,15 @@ export default function AuditPage() {
     }
   }, [token]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      await load();
+    })();
+    return () => { cancelled = true; };
+  }, [load]);
 
   // ── SSE stream ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -461,190 +673,304 @@ export default function AuditPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6 animate-slide-up pb-10">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-4 pb-6 border-b border-border">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div>
-            <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-muted-foreground font-medium mb-2">Security Intelligence</p>
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-              Audit &amp; Forensics
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1.5">
-              Trace memory operations, verify chain integrity, and investigate security events.
-            </p>
-          </div>
+    <div className="space-y-7 pb-10">
+      {/* ── Hero header ───────────────────────────────────────────────────── */}
+      <div
+        style={{
+          background: "#0A0F14",
+          border: `3px solid ${BLACK}`,
+          borderRadius: "16px",
+          boxShadow: SHADOW,
+          padding: "32px 36px",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: "20px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <p
+            style={{
+              fontFamily: FONT_MONO,
+              fontSize: "11px",
+              fontWeight: 700,
+              letterSpacing: "0.22em",
+              textTransform: "uppercase",
+              color: "#FACC15",
+              margin: 0,
+            }}
+          >
+            Security intelligence
+          </p>
+          <h1
+            style={{
+              fontFamily: FONT_HEAD,
+              fontSize: "44px",
+              fontWeight: 900,
+              letterSpacing: "-0.03em",
+              color: "#fff",
+              margin: "10px 0 0 0",
+              lineHeight: 1.05,
+            }}
+          >
+            Audit &amp; Forensics
+          </h1>
+          <p style={{ margin: "10px 0 0 0", fontSize: "15px", fontWeight: 600, color: "#94A3B8", maxWidth: "640px" }}>
+            Trace memory operations, verify chain integrity, and investigate security events.
+          </p>
+        </div>
 
-          {/* Chain integrity badge */}
-          <div className="flex items-center gap-2 flex-wrap sm:flex-col sm:items-end">
-            {fetching ? (
-              <Skeleton className="h-8 w-36" />
-            ) : verifyResult ? (
-              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-mono tracking-widest uppercase border ${
-                chainValid
-                  ? "bg-[#059669]/10 border-[#059669]/20 text-[#059669]"
-                  : "bg-rose-500/10 border-rose-500/20 text-rose-600"
-              }`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${chainValid ? "bg-[#059669] animate-pulse" : "bg-rose-400"}`} />
-                {chainValid ? `Chain Verified · ${chainTotal} entries` : `Chain Broken at #${brokenAt}`}
-              </div>
-            ) : error ? (
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-mono tracking-widest uppercase border bg-amber-500/10 border-amber-500/20 text-amber-600">
-                <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                Verification Unavailable
-              </div>
-            ) : null}
+        {/* Chain integrity + stream badges */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", flexShrink: 0 }}>
+          {fetching ? (
+            <div style={{ width: "160px", height: "40px", background: "#1E293B", borderRadius: "9px", animation: "pulse 1.5s ease-in-out infinite" }} />
+          ) : verifyResult ? (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                fontFamily: FONT_HEAD,
+                fontWeight: 900,
+                fontSize: "12px",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                color: BLACK,
+                background: chainValid ? "#2DD4A0" : "#FF4D4D",
+                border: `3px solid ${BLACK}`,
+                borderRadius: "9px",
+                boxShadow: SHADOW_SM,
+                padding: "9px 14px",
+              }}
+            >
+              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: BLACK }} />
+              {chainValid ? `Chain Verified · ${chainTotal} entries` : `Chain Broken at #${brokenAt}`}
+            </span>
+          ) : error ? (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                fontFamily: FONT_HEAD,
+                fontWeight: 900,
+                fontSize: "12px",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                color: BLACK,
+                background: "#FACC15",
+                border: `3px solid ${BLACK}`,
+                borderRadius: "9px",
+                boxShadow: SHADOW_SM,
+                padding: "9px 14px",
+              }}
+            >
+              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: BLACK }} />
+              Verification Unavailable
+            </span>
+          ) : null}
 
-            {/* Stream indicator */}
-            <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[9px] font-mono tracking-widest uppercase ${
-              streamConnected ? "text-[#059669]/60" : "text-muted-foreground font-medium"
-            }`}>
-              <div className={`w-1 h-1 rounded-full ${streamConnected ? "bg-[#059669] animate-pulse" : "bg-[#E0D9CC]"}`} />
-              {streamConnected ? "LIVE" : "STREAM OFFLINE"}
-            </div>
-          </div>
+          {/* Stream indicator */}
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "7px",
+              fontFamily: FONT_HEAD,
+              fontWeight: 900,
+              fontSize: "11px",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: BLACK,
+              background: streamConnected ? "#FFFFFF" : "#1E293B",
+              border: `3px solid ${BLACK}`,
+              borderRadius: "9px",
+              boxShadow: SHADOW_SM,
+              padding: "8px 12px",
+            }}
+          >
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: streamConnected ? "#2DD4A0" : "#64748B" }} />
+            {streamConnected ? "Live" : "Stream Offline"}
+          </span>
         </div>
       </div>
 
       {/* ── Global error ───────────────────────────────────────────────────── */}
       {error && (
-        <div className="rounded-xl p-5 bg-rose-500/5 border border-rose-500/15 flex items-center justify-between gap-4">
+        <div
+          style={{
+            background: "#FFE4E4",
+            border: `3px solid ${BLACK}`,
+            borderRadius: "14px",
+            boxShadow: SHADOW,
+            padding: "18px 20px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "16px",
+            flexWrap: "wrap",
+          }}
+        >
           <div>
-            <p className="text-[10px] font-mono tracking-widest uppercase text-rose-600/60 mb-1">Error</p>
-            <p className="text-sm text-rose-600">{error}</p>
+            <p style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: BLACK, margin: "0 0 4px 0" }}>Error</p>
+            <p style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: BLACK }}>{error}</p>
           </div>
-          <button onClick={load} className="shrink-0 px-4 py-2 rounded-lg text-[10px] font-bold font-mono tracking-widest uppercase bg-[#E6E0D4] text-foreground hover:bg-[#E0D9CC] transition-colors">
+          <NeoButton variant="secondary" size="sm" onClick={() => load(true)}>
             Retry
-          </button>
+          </NeoButton>
         </div>
       )}
 
       {/* ── Security posture bar ───────────────────────────────────────────── */}
       {!fetching && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {[
             {
               label: "Chain Integrity",
               value: verifyResult
                 ? (chainValid ? "VERIFIED" : "BROKEN")
                 : (error ? "UNAVAILABLE" : "—"),
-              color: verifyResult
-                ? (chainValid ? "#059669" : "#DC2626")
-                : "#6b7280",
+              accent: verifyResult
+                ? (chainValid ? "#2DD4A0" : "#FF4D4D")
+                : "#E2E8F0",
             },
             {
               label: "Audit Entries",
               value: verifyResult ? String(chainTotal) : "—",
-              color: "#7C3AED",
+              accent: "#C084FC",
             },
             {
               label: "Event Types",
               value: String(uniqueTypes.length || Object.keys(eventsByType).length || 0),
-              color: "#0284C7",
+              accent: "#4D9FFF",
             },
             {
               label: "Threat Detections",
               value: String(eventsByType["pattern_detected"] ?? 0),
-              color: (eventsByType["pattern_detected"] ?? 0) > 0 ? "#DC2626" : "#6b7280",
+              accent: (eventsByType["pattern_detected"] ?? 0) > 0 ? "#FF4D4D" : "#E2E8F0",
             },
             {
               label: "Signing Backend",
               value: signingBackend ? signingBackend.toUpperCase() : "—",
-              color: "#D97706",
+              accent: "#FACC15",
             },
             {
               label: "Key ID",
               value: keyId ? keyId.slice(0, 8) + "…" : "—",
-              color: "#6b7280",
+              accent: "#E2E8F0",
             },
           ].map((item) => (
-            <div key={item.label} className="panel-card p-4">
-              <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium mb-2 leading-tight">{item.label}</div>
-              <div className="text-sm font-bold font-mono" style={{ color: item.color }}>{item.value}</div>
-            </div>
+            <StatCard key={item.label} label={item.label} value={item.value} accent={item.accent} />
           ))}
         </div>
       )}
 
       {fetching && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {[1,2,3,4,5,6].map(i => <Skeleton key={i} className="h-16" />)}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {[1,2,3,4,5,6].map(i => <Skeleton key={i} height={72} />)}
         </div>
       )}
 
       {/* ── Event breakdown ────────────────────────────────────────────────── */}
       {!fetching && Object.keys(eventsByType).length > 0 && (
-        <div className="panel-card overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#0284C7]" />
-            <span className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">Event Breakdown</span>
-            <span className="ml-auto text-[10px] font-mono text-muted-foreground font-medium">{totalEvents} total</span>
-          </div>
-          <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <Panel title="Event Breakdown" description={`${totalEvents} total events`} accent="#4D9FFF">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Object.entries(eventsByType).map(([type, count]) => {
               const meta = getEventMeta(type);
               const pct = (count / (totalEvents || 1)) * 100;
               return (
                 <button
                   key={type}
-                  className="text-left rounded-lg p-3 border transition-all hover:bg-[#E6E0D4]"
-                  style={{ background: meta.bg, borderColor: meta.border }}
+                  type="button"
                   onClick={() => setFilterType(filterType === type ? "all" : type)}
+                  style={{
+                    textAlign: "left",
+                    padding: "14px",
+                    border: `3px solid ${BLACK}`,
+                    borderRadius: "12px",
+                    boxShadow: SHADOW_SM,
+                    background: filterType === type ? meta.bg : "#FFFFFF",
+                    cursor: "pointer",
+                    transform: "translate(-1px, -1px)",
+                    transition: "transform 100ms, box-shadow 100ms",
+                  }}
+                  onMouseDown={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.transform = "translate(2px, 2px)";
+                    (e.currentTarget as HTMLButtonElement).style.boxShadow = "1px 1px 0px #000";
+                  }}
+                  onMouseUp={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.transform = "translate(-1px, -1px)";
+                    (e.currentTarget as HTMLButtonElement).style.boxShadow = SHADOW_SM;
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.transform = "translate(-1px, -1px)";
+                    (e.currentTarget as HTMLButtonElement).style.boxShadow = SHADOW_SM;
+                  }}
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[9px] font-mono tracking-widest uppercase" style={{ color: meta.fg }}>{type}</span>
-                    <span className="text-lg font-bold" style={{ color: meta.fg, fontFamily: "var(--font-space-grotesk)" }}>{count}</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px", gap: "8px" }}>
+                    <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: BLACK, wordBreak: "break-all" }}>{type}</span>
+                    <span style={{ fontFamily: FONT_HEAD, fontSize: "22px", fontWeight: 900, color: BLACK, flexShrink: 0 }}>{count}</span>
                   </div>
-                  <div className="h-1 rounded-full bg-[#E6E0D4] overflow-hidden">
-                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: meta.fg, opacity: 0.6 }} />
+                  <div style={{ height: "8px", background: "#E2E8F0", border: `2px solid ${BLACK}`, borderRadius: "6px", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: meta.bg, borderRight: `2px solid ${BLACK}` }} />
                   </div>
-                  <div className="text-[8px] font-mono text-muted-foreground font-medium mt-1.5">{pct.toFixed(1)}% of all events</div>
+                  <div style={{ fontFamily: FONT_MONO, fontSize: "10px", fontWeight: 700, color: "#475569", marginTop: "6px" }}>{pct.toFixed(1)}% of all events</div>
                 </button>
               );
             })}
           </div>
           {filterType !== "all" && (
-            <div className="px-5 pb-3 flex items-center gap-2">
-              <span className="text-[10px] font-mono text-muted-foreground font-medium">Filtering by:</span>
-              <Badge label={filterType} bg={getEventMeta(filterType).bg} fg={getEventMeta(filterType).fg} />
-              <button onClick={() => setFilterType("all")} className="text-[10px] font-mono text-muted-foreground font-medium hover:text-foreground underline ml-1">clear</button>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "16px", paddingTop: "14px", borderTop: `2px solid ${BLACK}` }}>
+              <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: "#475569" }}>Filtering by:</span>
+              <Chip label={filterType} bg={getEventMeta(filterType).bg} />
+              <button
+                onClick={() => setFilterType("all")}
+                style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, textDecoration: "underline", color: BLACK, background: "none", border: "none", cursor: "pointer" }}
+              >
+                clear
+              </button>
             </div>
           )}
-        </div>
+        </Panel>
       )}
 
       {/* ── Event timeline ─────────────────────────────────────────────────── */}
-      <div className="panel-card overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
-            <span className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">Security Event Timeline</span>
-            {filterType !== "all" && (
-              <Badge label={`filtered: ${filterType}`} bg="rgba(26,26,26,0.05)" fg="#7A7164" />
-            )}
-          </div>
-          <button onClick={load} className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground font-medium hover:text-foreground font-medium transition-colors">
-            Refresh
-          </button>
-        </div>
-
+      <Panel
+        title="Security Event Timeline"
+        description={filterType !== "all" ? `Filtered: ${filterType}` : "Live hash-linked audit entries"}
+        accent="#FACC15"
+        action={<NeoButton size="sm" variant="secondary" onClick={() => load(true)}>Refresh</NeoButton>}
+      >
         {fetching && (
-          <div className="p-4 space-y-2">
-            {[1,2,3,4,5,6].map(i => <Skeleton key={i} className="h-12" />)}
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {[1,2,3,4,5,6].map(i => <Skeleton key={i} height={48} />)}
           </div>
         )}
 
         {!fetching && filteredEntries.length === 0 && (
-          <div className="py-16 text-center">
-            <div className="w-10 h-10 rounded-xl bg-[#E6E0D4] border border-border flex items-center justify-center mx-auto mb-4">
-              <svg className="w-5 h-5 text-muted-foreground font-medium" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
-              </svg>
+          <div style={{ padding: "48px 16px", textAlign: "center" }}>
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                margin: "0 auto 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#E2E8F0",
+                border: `3px solid ${BLACK}`,
+                borderRadius: "12px",
+                boxShadow: SHADOW_SM,
+                fontSize: "24px",
+              }}
+            >
+              📋
             </div>
-            <p className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground font-medium mb-2">
+            <p style={{ fontFamily: FONT_HEAD, fontSize: "14px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: BLACK, margin: "0 0 8px 0" }}>
               {filterType !== "all" ? `No ${filterType} events` : "No Audit Events"}
             </p>
-            <p className="text-xs text-muted-foreground font-medium">
+            <p style={{ margin: 0, fontSize: "13px", fontWeight: 600, color: "#475569" }}>
               {filterType !== "all"
                 ? "No events match the selected filter."
                 : "Security-sensitive memory operations will appear here."}
@@ -653,7 +979,7 @@ export default function AuditPage() {
         )}
 
         {!fetching && filteredEntries.length > 0 && (
-          <div>
+          <div style={{ margin: "-20px", marginTop: 0 }}>
             {filteredEntries.map((entry) => (
               <EventRow
                 key={entry.entry_id}
@@ -664,213 +990,191 @@ export default function AuditPage() {
             ))}
 
             {/* Load more */}
-            <div className="px-4 py-3 border-t border-border flex items-center justify-between">
-              <span className="text-[10px] font-mono text-muted-foreground font-medium">{filteredEntries.length} events shown</span>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderTop: `2px solid ${BLACK}` }}>
+              <span style={{ fontFamily: FONT_MONO, fontSize: "11px", fontWeight: 700, color: "#475569" }}>{filteredEntries.length} events shown</span>
               {hasMore ? (
-                <button
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                  className="px-4 py-2 rounded-lg text-[10px] font-bold font-mono tracking-widest uppercase bg-[#E6E0D4] border border-border text-foreground font-medium hover:bg-[#E0D9CC] hover:text-foreground font-medium transition-all disabled:opacity-40"
-                >
+                <NeoButton size="sm" variant="secondary" onClick={loadMore} disabled={loadingMore}>
                   {loadingMore ? "Loading…" : "Load More"}
-                </button>
+                </NeoButton>
               ) : (
-                <span className="text-[10px] font-mono text-muted-foreground font-medium">All events loaded</span>
+                <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: "#475569" }}>All events loaded</span>
               )}
             </div>
           </div>
         )}
-      </div>
+      </Panel>
 
       {/* ── Chain verification panel ────────────────────────────────────────── */}
-      <div className="panel-card overflow-hidden">
-        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border">
-          <div className={`w-1.5 h-1.5 rounded-full ${chainValid ? "bg-[#059669] animate-pulse" : chainValid === false ? "bg-rose-400" : "bg-foreground/20"}`} />
-          <span className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">Hash Chain Verification</span>
-        </div>
-        <div className="p-5">
-          {fetching ? (
-            <Skeleton className="h-16" />
-          ) : verifyResult ? (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className={`flex-1 rounded-lg p-4 border ${chainValid ? "bg-[#059669]/5 border-[#059669]/15" : "bg-rose-500/5 border-rose-500/15"}`}>
-                <div className="flex items-center gap-2 mb-2">
-                  {chainValid ? (
-                    <svg className="w-4 h-4 text-[#059669]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4 text-rose-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                    </svg>
-                  )}
-                  <span className={`text-sm font-bold ${chainValid ? "text-[#059669]" : "text-rose-600"}`}>
-                    {chainValid ? "Hash Chain Valid" : "Hash Chain Broken"}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {chainValid
-                    ? `All ${chainTotal} audit entries are correctly hash-linked. No tampering detected.`
-                    : `Tamper evidence detected at entry index #${brokenAt}. Chain integrity is compromised.`}
-                </p>
-              </div>
-              <div className="flex flex-col gap-2">
-                <div className="text-center rounded-lg px-4 py-3 bg-[#ECE7DD] border border-border">
-                  <div className="text-xl font-bold text-foreground" style={{ fontFamily: "var(--font-space-grotesk)" }}>{chainTotal}</div>
-                  <div className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Linked Entries</div>
-                </div>
-                <button onClick={load} className="px-4 py-2 rounded-lg text-[10px] font-bold font-mono tracking-widest uppercase bg-[#E6E0D4] border border-border text-foreground font-medium hover:bg-card transition-all">
-                  Re-verify
-                </button>
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground font-medium font-mono">
-              {error ? "Verification unavailable — " + error : "Loading verification state…"}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* ── Time-travel forensics ───────────────────────────────────────────── */}
-      <div className="panel-card overflow-hidden">
-        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border">
-          <div className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]" />
-          <span className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">Time-Travel Forensics</span>
-          <span className="ml-2 text-[9px] font-mono text-muted-foreground">— reconstruct memory state at any point in time</span>
-        </div>
-        <div className="p-5 space-y-4">
-          <p className="text-xs text-muted-foreground font-medium">
-            Query the audit trail as it existed at a specific timestamp. On CockroachDB uses AS OF SYSTEM TIME; on SQLite filters by recorded_at.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1">
-              <label className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium block mb-1.5">Timestamp (local time)</label>
-              <input
-                type="datetime-local"
-                value={timeTravelTs}
-                onChange={(e) => setTimeTravelTs(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg text-sm font-mono bg-[#E6E0D4] border border-border text-foreground font-medium focus:outline-none focus:border-[#8B5CF6]/40 focus:bg-[#E0D9CC] transition-all"
-              />
-              {timeTravelTs && (
-                <p className="text-[9px] font-mono text-muted-foreground font-medium mt-1">
-                  Local ({Intl.DateTimeFormat().resolvedOptions().timeZone}) → UTC {new Date(timeTravelTs).toISOString()}
-                </p>
-              )}
-            </div>
-            <div className="flex items-end">
-              <button
-                onClick={handleTimeTravel}
-                disabled={timeTravelLoading || !timeTravelTs}
-                className="px-5 py-2.5 rounded-lg text-[10px] font-bold font-mono tracking-widest uppercase bg-[#8B5CF6]/20 border border-[#8B5CF6]/20 text-[#7C3AED] hover:bg-[#8B5CF6]/30 transition-all disabled:opacity-40"
-              >
-                {timeTravelLoading ? "Querying…" : "Query State"}
-              </button>
-            </div>
-          </div>
-
-          {timeTravelError && (
-            <div className="rounded-lg p-3 bg-rose-500/5 border border-rose-500/15">
-              <p className="text-xs text-rose-600 font-mono">{timeTravelError}</p>
-            </div>
-          )}
-
-          {timeTravelResult && !timeTravelError && (
-            <div className="rounded-lg border border-border bg-[#E6E0D4] overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
-                <span className="text-[9px] font-mono tracking-widest uppercase text-muted-foreground font-medium">Query Result</span>
-                <span className="text-[10px] font-mono text-muted-foreground font-medium">
-                  {(timeTravelResult.total as number) ?? 0} events · {timeTravelResult.backend as string ?? ""}
+      <Panel title="Hash Chain Verification" description="SHA-256 tamper evidence across every audit entry" accent={chainValid === false ? "#FF4D4D" : chainValid ? "#2DD4A0" : "#E2E8F0"}>
+        {fetching ? (
+          <Skeleton height={80} />
+        ) : verifyResult ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: "stretch" }}>
+            <div
+              style={{
+                flex: "1 1 320px",
+                minWidth: 0,
+                padding: "16px 18px",
+                border: `3px solid ${BLACK}`,
+                borderRadius: "12px",
+                boxShadow: SHADOW_SM,
+                background: chainValid ? "#D9F99D" : "#FFE4E4",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                <span style={{ fontSize: "20px" }}>{chainValid ? "✅" : "⚠️"}</span>
+                <span style={{ fontFamily: FONT_HEAD, fontSize: "16px", fontWeight: 900, color: BLACK }}>
+                  {chainValid ? "Hash Chain Valid" : "Hash Chain Broken"}
                 </span>
               </div>
-              <div className="p-4 max-h-64 overflow-auto">
-                <pre className="text-[10px] font-mono text-muted-foreground whitespace-pre-wrap break-all leading-relaxed">
-                  {JSON.stringify(timeTravelResult, null, 2).slice(0, 8000)}
-                </pre>
-              </div>
+              <p style={{ margin: 0, fontSize: "13px", fontWeight: 600, color: "#475569", lineHeight: 1.55 }}>
+                {chainValid
+                  ? `All ${chainTotal} audit entries are correctly hash-linked. No tampering detected.`
+                  : `Tamper evidence detected at entry index #${brokenAt}. Chain integrity is compromised.`}
+              </p>
             </div>
-          )}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", flexShrink: 0 }}>
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "12px 20px",
+                  background: "#FFFFFF",
+                  border: `3px solid ${BLACK}`,
+                  borderRadius: "12px",
+                  boxShadow: SHADOW_SM,
+                  minWidth: "120px",
+                }}
+              >
+                <div style={{ fontFamily: FONT_HEAD, fontSize: "28px", fontWeight: 900, color: BLACK, lineHeight: 1.1 }}>{chainTotal}</div>
+                <div style={{ fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginTop: "4px" }}>Linked Entries</div>
+              </div>
+              <NeoButton size="sm" variant="secondary" onClick={() => load(true)}>
+                Re-verify
+              </NeoButton>
+            </div>
+          </div>
+        ) : (
+          <p style={{ margin: 0, fontFamily: FONT_MONO, fontSize: "13px", fontWeight: 700, color: "#475569" }}>
+            {error ? "Verification unavailable — " + error : "Loading verification state…"}
+          </p>
+        )}
+      </Panel>
+
+      {/* ── Time-travel forensics ───────────────────────────────────────────── */}
+      <Panel title="Time-Travel Forensics" description="Reconstruct memory state at any point in time" accent="#C084FC">
+        <p style={{ margin: "0 0 16px 0", fontSize: "13px", fontWeight: 600, color: "#475569", lineHeight: 1.6 }}>
+          Query the audit trail as it existed at a specific timestamp. On CockroachDB uses AS OF SYSTEM TIME; on SQLite filters by recorded_at.
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "flex-end" }}>
+          <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+            <label style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: BLACK, marginBottom: "6px" }}>
+              Timestamp (local time)
+            </label>
+            <input
+              type="datetime-local"
+              value={timeTravelTs}
+              onChange={(e) => setTimeTravelTs(e.target.value)}
+              style={inputStyle}
+            />
+            {timeTravelTs && (
+              <p style={{ margin: "6px 0 0 0", fontFamily: FONT_MONO, fontSize: "10px", fontWeight: 700, color: "#475569" }}>
+                Local ({Intl.DateTimeFormat().resolvedOptions().timeZone}) → UTC {new Date(timeTravelTs).toISOString()}
+              </p>
+            )}
+          </div>
+          <div>
+            <NeoButton onClick={handleTimeTravel} disabled={timeTravelLoading || !timeTravelTs} variant="secondary">
+              {timeTravelLoading ? "Querying…" : "Query State"}
+            </NeoButton>
+          </div>
         </div>
-      </div>
+
+        {timeTravelError && (
+          <div
+            style={{
+              marginTop: "14px",
+              padding: "12px 14px",
+              background: "#FFE4E4",
+              border: `3px solid ${BLACK}`,
+              borderRadius: "10px",
+              boxShadow: SHADOW_SM,
+            }}
+          >
+            <p style={{ margin: 0, fontFamily: FONT_MONO, fontSize: "12px", fontWeight: 700, color: BLACK }}>{timeTravelError}</p>
+          </div>
+        )}
+
+        {timeTravelResult && !timeTravelError && (
+          <div style={{ marginTop: "14px", border: `3px solid ${BLACK}`, borderRadius: "12px", boxShadow: SHADOW_SM, overflow: "hidden", background: "#FFFFFF" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap", padding: "10px 14px", borderBottom: `3px solid ${BLACK}`, background: "#F1F5F9" }}>
+              <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: BLACK }}>Query Result</span>
+              <span style={{ fontFamily: FONT_MONO, fontSize: "11px", fontWeight: 700, color: "#475569" }}>
+                {(timeTravelResult.total as number) ?? 0} events · {timeTravelResult.backend as string ?? ""}
+              </span>
+            </div>
+            <div style={{ padding: "14px", maxHeight: "256px", overflow: "auto" }}>
+              <pre style={{ margin: 0, fontFamily: FONT_MONO, fontSize: "11px", fontWeight: 600, color: "#475569", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: 1.6 }}>
+                {JSON.stringify(timeTravelResult, null, 2).slice(0, 8000)}
+              </pre>
+            </div>
+          </div>
+        )}
+      </Panel>
 
       {/* ── Export & compliance ─────────────────────────────────────────────── */}
-      <div className="panel-card overflow-hidden">
-        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border">
-          <div className="w-1.5 h-1.5 rounded-full bg-[#0284C7]" />
-          <span className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">Export &amp; Compliance</span>
-        </div>
-        <div className="p-5 flex flex-wrap gap-3">
+      <Panel title="Export &amp; Compliance" description="Portable audit records for external review" accent="#4D9FFF">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "14px" }}>
           {/* Export JSONL */}
-          <div className="flex flex-col gap-1">
-            <button
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: "200px" }}>
+            <NeoButton
               onClick={handleExportJsonl}
               disabled={exportStatus === "loading"}
-              className={`px-4 py-2.5 rounded-lg text-[10px] font-bold font-mono tracking-widest uppercase border transition-all ${
-                exportStatus === "done"
-                  ? "bg-[#059669]/10 border-[#059669]/20 text-[#059669]"
-                  : exportStatus === "error"
-                  ? "bg-rose-500/10 border-rose-500/20 text-rose-600"
-                  : "bg-[#E6E0D4] border-border text-foreground font-medium hover:bg-card hover:text-foreground font-medium"
-              }`}
+              variant={exportStatus === "done" ? "primary" : exportStatus === "error" ? "danger" : "secondary"}
             >
               {exportStatus === "loading" ? "Exporting…"
                 : exportStatus === "done" ? "✓ Exported"
                 : exportStatus === "error" ? "Export Failed"
                 : "Export Audit JSONL"}
-            </button>
-            <span className="text-[9px] font-mono text-muted-foreground font-medium">Full audit trail as JSONL</span>
+            </NeoButton>
+            <span style={{ fontFamily: FONT_MONO, fontSize: "10px", fontWeight: 700, color: "#475569" }}>Full audit trail as JSONL</span>
           </div>
 
           {/* Export CSV */}
-          <div className="flex flex-col gap-1">
-            <button
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: "200px" }}>
+            <NeoButton
               onClick={handleExportCsv}
               disabled={csvExportStatus === "loading"}
-              className={`px-4 py-2.5 rounded-lg text-[10px] font-bold font-mono tracking-widest uppercase border transition-all ${
-                csvExportStatus === "done"
-                  ? "bg-[#059669]/10 border-[#059669]/20 text-[#059669]"
-                  : csvExportStatus === "error"
-                  ? "bg-rose-500/10 border-rose-500/20 text-rose-600"
-                  : "bg-[#E6E0D4] border-border text-foreground font-medium hover:bg-card hover:text-foreground font-medium"
-              }`}
+              variant={csvExportStatus === "done" ? "primary" : csvExportStatus === "error" ? "danger" : "secondary"}
             >
               {csvExportStatus === "loading" ? "Exporting…"
                 : csvExportStatus === "done" ? "✓ Exported"
                 : csvExportStatus === "error" ? "Export Failed"
                 : "Export Audit CSV"}
-            </button>
-            <span className="text-[9px] font-mono text-muted-foreground font-medium">Audit event table as CSV</span>
+            </NeoButton>
+            <span style={{ fontFamily: FONT_MONO, fontSize: "10px", fontWeight: 700, color: "#475569" }}>Audit event table as CSV</span>
           </div>
 
           {/* Export compliance */}
-          <div className="flex flex-col gap-1">
-            <button
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: "200px" }}>
+            <NeoButton
               onClick={handleExportCompliance}
               disabled={complianceExportStatus === "loading"}
-              className={`px-4 py-2.5 rounded-lg text-[10px] font-bold font-mono tracking-widest uppercase border transition-all ${
-                complianceExportStatus === "done"
-                  ? "bg-[#059669]/10 border-[#059669]/20 text-[#059669]"
-                  : complianceExportStatus === "error"
-                  ? "bg-rose-500/10 border-rose-500/20 text-rose-600"
-                  : complianceExportStatus === "forbidden"
-                  ? "bg-amber-500/10 border-amber-500/20 text-amber-600"
-                  : "bg-[#E6E0D4] border-border text-foreground font-medium hover:bg-card hover:text-foreground font-medium"
-              }`}
+              variant={complianceExportStatus === "done" ? "primary" : complianceExportStatus === "forbidden" ? "secondary" : complianceExportStatus === "error" ? "danger" : "secondary"}
             >
               {complianceExportStatus === "loading" ? "Generating…"
                 : complianceExportStatus === "done" ? "✓ Downloaded"
                 : complianceExportStatus === "error" ? "Export Failed"
                 : complianceExportStatus === "forbidden" ? "Access Restricted"
                 : "Export Compliance JSON"}
-            </button>
-            <span className="text-[9px] font-mono text-muted-foreground font-medium">
+            </NeoButton>
+            <span style={{ fontFamily: FONT_MONO, fontSize: "10px", fontWeight: 700, color: "#475569" }}>
               {complianceExportStatus === "forbidden"
                 ? "Requires admin role"
                 : "EU AI Act Article 12 report"}
             </span>
           </div>
         </div>
-      </div>
+      </Panel>
     </div>
   );
 }

@@ -21,6 +21,68 @@ interface ApiOptions {
   body?: unknown;
   token?: string;
   timeoutMs?: number;
+  forceRefresh?: boolean;
+}
+
+const CACHE_PREFIX = "agentshield_cache_";
+const memoryCache = new Map<string, unknown>();
+
+function getCachedData<T>(cacheKey: string): T | null {
+  if (memoryCache.has(cacheKey)) {
+    return memoryCache.get(cacheKey) as T;
+  }
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem(CACHE_PREFIX + cacheKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        memoryCache.set(cacheKey, parsed);
+        return parsed as T;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function setCachedData(cacheKey: string, data: unknown) {
+  memoryCache.set(cacheKey, data);
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(CACHE_PREFIX + cacheKey, JSON.stringify(data));
+    } catch {}
+  }
+}
+
+export function invalidateCache(prefix?: string) {
+  if (!prefix) {
+    memoryCache.clear();
+    if (typeof window !== "undefined") {
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith(CACHE_PREFIX)) keysToRemove.push(k);
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+      } catch {}
+    }
+    return;
+  }
+
+  for (const k of Array.from(memoryCache.keys())) {
+    if (k.includes(prefix)) memoryCache.delete(k);
+  }
+  if (typeof window !== "undefined") {
+    try {
+      const target = CACHE_PREFIX + prefix;
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.includes(target)) keysToRemove.push(k);
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+    } catch {}
+  }
 }
 
 export class ApiError extends Error {
@@ -86,6 +148,18 @@ async function doFetch(path: string, opts: ApiOptions, headers: Record<string, s
 }
 
 async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
+  const method = (opts.method || "GET").toUpperCase();
+  const isGet = method === "GET";
+  const cacheKey = `${opts.token || "anon"}_${path}`;
+
+  // If GET and not forcing refresh, return cached data immediately if available
+  if (isGet && !opts.forceRefresh) {
+    const cached = getCachedData<T>(cacheKey);
+    if (cached !== null && cached !== undefined) {
+      return cached;
+    }
+  }
+
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
 
@@ -96,6 +170,13 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     res = await doFetch(path, opts, headers, ctrl.signal);
   } catch (e) {
     clearTimeout(timer);
+    // If network / backend fails, fallback to stale cached data for offline resilience
+    if (isGet) {
+      const fallback = getCachedData<T>(cacheKey);
+      if (fallback !== null && fallback !== undefined) {
+        return fallback;
+      }
+    }
     if (e instanceof DOMException && e.name === "AbortError") {
       throw new ApiError("Request timed out", 0, e);
     }
@@ -161,12 +242,25 @@ async function request<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   clearTimeout(timer);
 
   if (!res.ok) {
+    if (isGet) {
+      const fallback = getCachedData<T>(cacheKey);
+      if (fallback !== null && fallback !== undefined) {
+        return fallback;
+      }
+    }
     const detail = await parseBody(res).catch(() => null);
     throw new ApiError(extractErrorMessage(detail, res.statusText), res.status, detail);
   }
 
   if (res.status === 204) return undefined as T;
-  return (await parseBody(res)) as T;
+  const result = (await parseBody(res)) as T;
+
+  // Cache successful GET responses
+  if (isGet && result !== null && result !== undefined) {
+    setCachedData(cacheKey, result);
+  }
+
+  return result;
 }
 
 export interface ChatTurn {
@@ -213,7 +307,8 @@ export interface ChatResponse {
 
 export const api = {
   // Health
-  health: () => request<{ status: string; db: string; engine?: string; signing?: Record<string, unknown> }>("/health"),
+  health: (forceRefresh?: boolean) =>
+    request<{ status: string; db: string; engine?: string; signing?: Record<string, unknown> }>("/health", { forceRefresh }),
 
   // Auth
   register: (email: string, password: string, full_name: string) =>
@@ -231,8 +326,11 @@ export const api = {
       "/api/auth/refresh",
       { method: "POST" }
     ),
-  logout: () =>
-    request<{ status: string }>("/api/auth/logout", { method: "POST" }),
+  logout: async () => {
+    const res = await request<{ status: string }>("/api/auth/logout", { method: "POST" });
+    invalidateCache();
+    return res;
+  },
   me: (token: string) =>
     request<{ user_id: string; email: string; full_name: string; role: string; org_id: string }>(
       "/api/auth/me",
@@ -240,44 +338,56 @@ export const api = {
     ),
 
   // Constraints
-  listConstraints: (token: string, params?: { limit?: number; offset?: number }) => {
+  listConstraints: (token: string, params?: { limit?: number; offset?: number }, forceRefresh?: boolean) => {
     const qs = params ? "?" + new URLSearchParams(Object.entries(params).reduce((acc, [k, v]) => { if (v !== undefined) acc[k] = String(v); return acc; }, {} as Record<string, string>)).toString() : "";
-    return request<Record<string, unknown>[]>(`/api/constraints${qs}`, { token });
+    return request<Record<string, unknown>[]>(`/api/constraints${qs}`, { token, forceRefresh });
   },
-  pinConstraint: (token: string, text: string, constraint_type: string) =>
-    request<Record<string, unknown>>("/api/constraints", {
+  pinConstraint: async (token: string, text: string, constraint_type: string) => {
+    const res = await request<Record<string, unknown>>("/api/constraints", {
       method: "POST",
       body: { text, constraint_type },
       token,
-    }),
-  updateConstraint: (token: string, id: string, text: string, constraint_type?: string) =>
-    request<Record<string, unknown>>(`/api/constraints/${id}`, {
+    });
+    invalidateCache("/api/constraints");
+    return res;
+  },
+  updateConstraint: async (token: string, id: string, text: string, constraint_type?: string) => {
+    const res = await request<Record<string, unknown>>(`/api/constraints/${id}`, {
       method: "PUT",
       body: { text, constraint_type },
       token,
-    }),
-  deleteConstraint: (token: string, id: string) =>
-    request<void>(`/api/constraints/${id}`, { method: "DELETE", token }),
-  verifyConstraints: (token: string) =>
-    request<Record<string, unknown>>("/api/constraints/integrity/verify", { token }),
-  integrityScore: (token: string) =>
-    request<Record<string, unknown>>("/api/constraints/integrity/score", { token }),
+    });
+    invalidateCache("/api/constraints");
+    return res;
+  },
+  deleteConstraint: async (token: string, id: string) => {
+    const res = await request<void>(`/api/constraints/${id}`, { method: "DELETE", token });
+    invalidateCache("/api/constraints");
+    return res;
+  },
+  verifyConstraints: (token: string, forceRefresh?: boolean) =>
+    request<Record<string, unknown>>("/api/constraints/integrity/verify", { token, forceRefresh }),
+  integrityScore: (token: string, forceRefresh?: boolean) =>
+    request<Record<string, unknown>>("/api/constraints/integrity/score", { token, forceRefresh }),
 
   // Memories
-  listMemories: (token: string, params?: { limit?: number; offset?: number }) => {
+  listMemories: (token: string, params?: { limit?: number; offset?: number }, forceRefresh?: boolean) => {
     const qs = params ? "?" + new URLSearchParams(Object.entries(params).reduce((acc, [k, v]) => { if (v !== undefined) acc[k] = String(v); return acc; }, {} as Record<string, string>)).toString() : "";
-    return request<Record<string, unknown>[]>(`/api/memories${qs}`, { token });
+    return request<Record<string, unknown>[]>(`/api/memories${qs}`, { token, forceRefresh });
   },
-  memoryStats: (token: string) =>
-    request<Record<string, unknown>>("/api/memories/stats", { token }),
-  storeMemory: (token: string, content: string, memory_type: string) =>
-    request<Record<string, unknown>>("/api/memories", {
+  memoryStats: (token: string, forceRefresh?: boolean) =>
+    request<Record<string, unknown>>("/api/memories/stats", { token, forceRefresh }),
+  storeMemory: async (token: string, content: string, memory_type: string) => {
+    const res = await request<Record<string, unknown>>("/api/memories", {
       method: "POST",
       body: { content, memory_type },
       token,
-    }),
-  verifyMemories: (token: string) =>
-    request<Record<string, unknown>>("/api/memories/chain/verify", { token }),
+    });
+    invalidateCache("/api/memories");
+    return res;
+  },
+  verifyMemories: (token: string, forceRefresh?: boolean) =>
+    request<Record<string, unknown>>("/api/memories/chain/verify", { token, forceRefresh }),
   getMemory: (token: string, memoryId: string) =>
     request<Record<string, unknown>>(`/api/memories/${memoryId}`, { token }),
 
@@ -288,8 +398,8 @@ export const api = {
       body: { text },
       token,
     }),
-  scanPatterns: (token: string) =>
-    request<Record<string, unknown>>("/api/scan/patterns", { token }),
+  scanPatterns: (token: string, forceRefresh?: boolean) =>
+    request<Record<string, unknown>>("/api/scan/patterns", { token, forceRefresh }),
 
   // Chat (live Groq agent behind the scan gate)
   chat: (token: string, message: string, history: ChatTurn[] = []) =>
@@ -301,20 +411,20 @@ export const api = {
     }),
 
   // Audit
-  auditEntries: (token: string, params?: Record<string, string>) => {
+  auditEntries: (token: string, params?: Record<string, string>, forceRefresh?: boolean) => {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return request<Record<string, unknown>>(`/api/audit${qs}`, { token });
+    return request<Record<string, unknown>>(`/api/audit${qs}`, { token, forceRefresh });
   },
-  auditTimeline: (token: string) =>
-    request<Record<string, unknown>>("/api/audit/timeline", { token }),
-  auditVerify: (token: string) =>
-    request<Record<string, unknown>>("/api/audit/verify", { token }),
+  auditTimeline: (token: string, forceRefresh?: boolean) =>
+    request<Record<string, unknown>>("/api/audit/timeline", { token, forceRefresh }),
+  auditVerify: (token: string, forceRefresh?: boolean) =>
+    request<Record<string, unknown>>("/api/audit/verify", { token, forceRefresh }),
   auditTimeTravel: (token: string, timestamp: string) =>
     request<Record<string, unknown>>(`/api/audit/time-travel?timestamp=${encodeURIComponent(timestamp)}`, { token }),
   auditDbTimeTravel: (token: string, timestamp: string, table: string = "audit_log") =>
     request<Record<string, unknown>>(`/api/audit/db-time-travel?timestamp=${encodeURIComponent(timestamp)}&table=${encodeURIComponent(table)}`, { token }),
-  complianceReport: (token: string) =>
-    request<Record<string, unknown>>("/api/audit/compliance/report", { token }),
+  complianceReport: (token: string, forceRefresh?: boolean) =>
+    request<Record<string, unknown>>("/api/audit/compliance/report", { token, forceRefresh }),
   exportJsonl: (token: string) =>
     request<string>("/api/audit/export/jsonl", { token }),
   exportCsv: (token: string) =>

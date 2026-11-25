@@ -186,7 +186,7 @@ class PatternDetectionEngine:
                 "name": "System Prompt Extraction",
                 "category": Category.INJECTION,
                 "severity": Severity.HIGH,
-                "regex": r"(show|reveal|print|output|display|repeat|echo|tell|share)\s+(me\s+)?(your|the|my)\s+(system\s+)?(prompt|instructions|rules|guidelines|configuration)",
+                "regex": r"(show|reveal|print|output|display|repeat|echo|tell|share|give|want|need|provide|get|access|expose|leak|dump)\s+(me\s+)?(your|the|my)\s+(system\s+)?(prompt|instructions|rules|guidelines|configuration)|(system\s+prompt|your\s+instructions|your\s+rules|your\s+guidelines|your\s+configuration)\s*(please|now|\?)?",
                 "description": "Attempts to extract the system prompt",
             },
             {
@@ -263,8 +263,8 @@ class PatternDetectionEngine:
                 "name": "Memory Implant",
                 "category": Category.MEMORY_POISONING,
                 "severity": Severity.CRITICAL,
-                "regex": r"(remember|store|save|write\s+to\s+memory|add\s+to\s+(your\s+)?(knowledge|memory)|persist|log\s+this)\s*[:\-]?\s*(you\s+are|this\s+is|the\s+truth|always\s+remember|from\s+now\s+on)",
-                "description": "Attempts to implant false memories",
+                "regex": r"(remember|store|save|write\s+to\s+memory|add\s+to\s+(your\s+)?(knowledge|memory)|persist|log\s+this)\s*[:\-]?\s*(you\s+are|this\s+is|the\s+truth|always\s+remember|from\s+now\s+on|override|ignore|bypass|disable|forget|pretend|act\s+as|your\s+(new\s+)?(rule|constraint|instruction|directive|behaviour|behavior|persona)|safety\s+(rule|constraint)|always\s+(respond|say|do|act|be)|never\s+(refuse|say|do))",
+                "description": "Attempts to implant false memories or override safety rules via remember prefix",
             },
             {
                 "id": "MEM-002",
@@ -332,8 +332,8 @@ class PatternDetectionEngine:
                 "name": "Credential Harvest",
                 "category": Category.DATA_EXFILTRATION,
                 "severity": Severity.CRITICAL,
-                "regex": r"(send|transmit|email|upload|exfiltrate|share|forward|post)\s+(me\s+)?(all\s+)?([\w\s]{0,20})?(passwords?|tokens?|keys?|secrets?|credentials?|api.?keys?|auth.?tokens?|private.?keys?)",
-                "description": "Attempts to harvest credentials",
+                "regex": r"(send|transmit|email|upload|exfiltrate|share|forward|post|give|want|need|provide|get|access|show|reveal|tell)\s+(me\s+)?(all\s+)?([\w\s]{0,20})?(passwords?|tokens?|api[\s\-_]?keys?|secrets?|credentials?|auth[\s\-_]?tokens?|private[\s\-_]?keys?|groq[\s\-_]?key|openai[\s\-_]?key)|(api[\s\-_]?key|groq[\s\-_]?key|openai[\s\-_]?key|secret[\s\-_]?key)\s*(please|now|of|\?|for)?",
+                "description": "Attempts to harvest credentials or API keys",
             },
             {
                 "id": "EXF-002",

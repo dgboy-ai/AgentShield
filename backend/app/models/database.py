@@ -73,7 +73,8 @@ except Exception as e:
     }
     engine = create_engine(DATABASE_URL, **engine_kwargs)
 
-# Log slow queries in development
+# Log slow queries in development — threshold raised for cloud DBs (CockroachDB has 150-800ms baseline)
+_slow_query_threshold = float(os.getenv("SLOW_QUERY_MS", "1500" if is_cockroach else "200")) / 1000
 if ENVIRONMENT == "development":
     @event.listens_for(engine, "before_cursor_execute")
     def _log_query(conn, cursor, statement, parameters, context, executemany):
@@ -86,7 +87,7 @@ if ENVIRONMENT == "development":
         starts = conn.info.get("query_start_time", [])
         if starts:
             elapsed = time.monotonic() - starts.pop()
-            if elapsed > 0.1:  # Log queries slower than 100ms
+            if elapsed > _slow_query_threshold:
                 logger.warning("Slow query (%.3fs): %s", elapsed, statement[:200])
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

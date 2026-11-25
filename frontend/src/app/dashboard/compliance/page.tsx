@@ -1,11 +1,17 @@
 "use client";
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "sonner";
+
+const BLACK = "#000000";
+const SHADOW = `6px 6px 0px ${BLACK}`;
+const SHADOW_SM = `4px 4px 0px ${BLACK}`;
+const FONT_HEAD = "var(--font-space-grotesk)";
+const FONT_MONO = "var(--font-geist-mono)";
 
 interface ComplianceReport {
   report_id: string;
@@ -29,8 +35,6 @@ interface EventMeta {
   legalRelevance: string;
   icon: string;
   color: string;
-  accentBg: string;
-  accentBorder: string;
 }
 
 const EVENT_METAS: Record<string, EventMeta> = {
@@ -42,9 +46,7 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Every single time an agent or user saves a memory, a cryptographic hash link is created. This count represents your agent's total stored state history.",
     legalRelevance: "EU AI Act Art. 12(1): Requires continuous recording of all state transitions and training/inference context.",
     icon: "💾",
-    color: "#059669",
-    accentBg: "rgba(5, 150, 105, 0.08)",
-    accentBorder: "rgba(5, 150, 105, 0.25)",
+    color: "#2DD4A0",
   },
   constraint_pinned: {
     title: "Safety Constraint Pinned",
@@ -54,9 +56,7 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Shows how many active safety boundaries are currently locked into the system. These rules can NEVER be erased by context compaction or prompt injection.",
     legalRelevance: "EU AI Act Art. 14(4): Human oversight — guarantees organizational policies supersede autonomous actions.",
     icon: "📌",
-    color: "#2563EB",
-    accentBg: "rgba(37, 99, 235, 0.08)",
-    accentBorder: "rgba(37, 99, 235, 0.25)",
+    color: "#4D9FFF",
   },
   memory_constraint_conflict: {
     title: "Poisoning Attempt Rejected",
@@ -66,9 +66,7 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Proof of active defense! Every tally here represents an attack that was caught and stopped before it could poison future conversations.",
     legalRelevance: "OWASP ASI06: Memory & Context Poisoning prevention with verifiable mitigation logs.",
     icon: "🛡️",
-    color: "#D97706",
-    accentBg: "rgba(217, 119, 6, 0.08)",
-    accentBorder: "rgba(217, 119, 6, 0.25)",
+    color: "#FACC15",
   },
   pattern_detected: {
     title: "Adversarial Pattern Caught",
@@ -78,9 +76,7 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Direct prompt injection attempts blocked in under 5 milliseconds with zero tokens billed to the LLM.",
     legalRelevance: "EU AI Act Art. 15(1): Cybersecurity resilience against adversarial inputs and jailbreak attempts.",
     icon: "⚡",
-    color: "#DC2626",
-    accentBg: "rgba(220, 38, 38, 0.08)",
-    accentBorder: "rgba(220, 38, 38, 0.25)",
+    color: "#FF4D4D",
   },
   chat_turn: {
     title: "Guarded Inference Turn",
@@ -90,9 +86,7 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Total user conversations protected by AgentShield. Every turn is audited with risk scores and token overhead metrics.",
     legalRelevance: "EU AI Act Art. 12(2): Automated logging of all high-risk input/output exchanges.",
     icon: "💬",
-    color: "#7C3AED",
-    accentBg: "rgba(124, 58, 237, 0.08)",
-    accentBorder: "rgba(124, 58, 237, 0.25)",
+    color: "#C084FC",
   },
   compliance_report: {
     title: "Regulatory Audit Snapshot",
@@ -102,9 +96,7 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Formal audit certificates generated. Demonstrates continuous post-market monitoring and audit readiness.",
     legalRelevance: "EU AI Act Art. 12(3) & Art. 72: Post-market monitoring documentation.",
     icon: "📋",
-    color: "#0891B2",
-    accentBg: "rgba(8, 145, 178, 0.08)",
-    accentBorder: "rgba(8, 145, 178, 0.25)",
+    color: "#4D9FFF",
   },
   chain_verified: {
     title: "Cryptographic Chain Verified",
@@ -114,9 +106,7 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Number of full-chain integrity sweeps executed. Verifies that zero database records were altered out-of-band.",
     legalRelevance: "Article 12: Non-repudiation and proof of immutability for compliance officers.",
     icon: "🔗",
-    color: "#059669",
-    accentBg: "rgba(5, 150, 105, 0.08)",
-    accentBorder: "rgba(5, 150, 105, 0.25)",
+    color: "#2DD4A0",
   },
   chain_anchored: {
     title: "External Chain Anchor",
@@ -126,9 +116,7 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Anchored ledger checkpoints preventing long-range fork attacks.",
     legalRelevance: "Article 12: Tamper-evident non-repudiation.",
     icon: "⚓",
-    color: "#6366F1",
-    accentBg: "rgba(99, 102, 241, 0.08)",
-    accentBorder: "rgba(99, 102, 241, 0.25)",
+    color: "#C084FC",
   },
   system_startup: {
     title: "System Boot Initialized",
@@ -138,13 +126,10 @@ const EVENT_METAS: Record<string, EventMeta> = {
     whyThisNumber: "Tracks system boot cycles and cryptographic state restarts.",
     legalRelevance: "Article 12: System availability and lifecycle monitoring.",
     icon: "🚀",
-    color: "#64748B",
-    accentBg: "rgba(100, 116, 139, 0.08)",
-    accentBorder: "rgba(100, 116, 139, 0.25)",
+    color: "#94A3B8",
   },
 };
 
-// Helper function to resolve meta regardless of uppercase or lowercase
 function getEventMeta(type: string): EventMeta {
   const normalized = type.toLowerCase();
   return EVENT_METAS[normalized] || {
@@ -155,10 +140,263 @@ function getEventMeta(type: string): EventMeta {
     whyThisNumber: `This counter tracks every time a ${type} action was processed by AgentShield.`,
     legalRelevance: "EU AI Act Art. 12: Continuous auditability of automated processes.",
     icon: "⚡",
-    color: "#059669",
-    accentBg: "rgba(5, 150, 105, 0.08)",
-    accentBorder: "rgba(5, 150, 105, 0.25)",
+    color: "#2DD4A0",
   };
+}
+
+function NeoButton({
+  children,
+  onClick,
+  disabled,
+  variant = "primary",
+  size = "md",
+  testid,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: "primary" | "secondary" | "danger" | "ghost";
+  size?: "sm" | "md";
+  testid?: string;
+}) {
+  const palette =
+    variant === "primary"
+      ? { bg: "#2DD4A0", fg: "#000" }
+      : variant === "danger"
+      ? { bg: "#FF4D4D", fg: "#000" }
+      : variant === "ghost"
+      ? { bg: "transparent", fg: "#000" }
+      : { bg: "#FFFFFF", fg: "#000" };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      data-testid={testid}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "7px",
+        fontFamily: FONT_HEAD,
+        fontWeight: 900,
+        fontSize: size === "sm" ? "12px" : "13px",
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        color: palette.fg,
+        background: palette.bg,
+        border: `3px solid ${BLACK}`,
+        borderRadius: "9px",
+        boxShadow: variant === "ghost" ? "none" : SHADOW_SM,
+        padding: size === "sm" ? "7px 12px" : "10px 16px",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.55 : 1,
+        whiteSpace: "nowrap",
+        transform: "translate(-1px, -1px)",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Chip({
+  label,
+  bg,
+  fg = "#000",
+  onClick,
+  title,
+}: {
+  label: string;
+  bg: string;
+  fg?: string;
+  onClick?: () => void;
+  title?: string;
+}) {
+  const Tag = onClick ? "button" : "span";
+  return (
+    <Tag
+      onClick={onClick}
+      title={title}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        background: bg,
+        color: fg,
+        border: `3px solid ${BLACK}`,
+        borderRadius: "9px",
+        padding: "7px 13px",
+        fontSize: "12px",
+        fontWeight: 900,
+        fontFamily: FONT_HEAD,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        flexShrink: 0,
+        boxShadow: SHADOW_SM,
+        whiteSpace: "nowrap",
+        cursor: onClick ? "pointer" : "default",
+        transform: "translate(-1px, -1px)",
+      }}
+    >
+      {label}
+    </Tag>
+  );
+}
+
+function Panel({
+  title,
+  description,
+  accent,
+  action,
+  children,
+}: {
+  title: string;
+  description?: string;
+  accent: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "#FFFFFF",
+        border: `3px solid ${BLACK}`,
+        borderRadius: "16px",
+        boxShadow: SHADOW,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "12px",
+          flexWrap: "wrap",
+          padding: "16px 20px",
+          borderBottom: `3px solid ${BLACK}`,
+          background: accent,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+          <span style={{ width: "14px", height: "14px", borderRadius: "50%", background: BLACK, flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ fontFamily: FONT_HEAD, fontSize: "18px", fontWeight: 900, color: BLACK, margin: 0, letterSpacing: "-0.01em" }}>
+              {title}
+            </h3>
+            {description ? (
+              <p style={{ margin: "2px 0 0 0", fontSize: "13px", fontWeight: 700, color: BLACK, opacity: 0.65 }}>{description}</p>
+            ) : null}
+          </div>
+        </div>
+        {action}
+      </div>
+      <div style={{ padding: "20px" }}>{children}</div>
+    </div>
+  );
+}
+
+function KpiCard({
+  value,
+  label,
+  sublabel,
+  icon,
+  accent,
+  onClick,
+  hint,
+}: {
+  value: React.ReactNode;
+  label: string;
+  sublabel: string;
+  icon: string;
+  accent: string;
+  onClick: () => void;
+  hint: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        background: "#fff",
+        border: `3px solid ${BLACK}`,
+        borderRadius: "14px",
+        boxShadow: SHADOW,
+        padding: "20px",
+        cursor: "pointer",
+        transform: "translate(-1px, -1px)",
+        transition: "transform 100ms, box-shadow 100ms",
+      }}
+      onMouseDown={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.transform = "translate(2px, 2px)";
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = "1px 1px 0px #000";
+      }}
+      onMouseUp={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.transform = "translate(-1px, -1px)";
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = SHADOW;
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.transform = "translate(-1px, -1px)";
+        (e.currentTarget as HTMLButtonElement).style.boxShadow = SHADOW;
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+        <div
+          style={{
+            fontFamily: FONT_HEAD,
+            fontSize: "34px",
+            fontWeight: 900,
+            letterSpacing: "-0.02em",
+            color: BLACK,
+            lineHeight: 1.1,
+          }}
+        >
+          {value}
+        </div>
+        <span
+          style={{
+            width: "44px",
+            height: "44px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "22px",
+            background: accent,
+            border: `3px solid ${BLACK}`,
+            borderRadius: "11px",
+            boxShadow: `3px 3px 0px ${BLACK}`,
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </span>
+      </div>
+      <div
+        style={{
+          fontFamily: FONT_HEAD,
+          fontSize: "12px",
+          fontWeight: 900,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: BLACK,
+          marginTop: "12px",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginTop: "4px" }}>{sublabel}</div>
+      <p style={{ margin: "12px 0 0 0", fontSize: "12px", fontWeight: 600, color: "#64748B", lineHeight: 1.5, borderTop: `2px solid ${BLACK}`, paddingTop: "10px" }}>
+        {hint}
+      </p>
+      <div style={{ marginTop: "10px", fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: BLACK, opacity: 0.5 }}>
+        Click for details →
+      </div>
+    </button>
+  );
 }
 
 export default function CompliancePage() {
@@ -168,20 +406,27 @@ export default function CompliancePage() {
   const [error, setError] = useState<string | null>(null);
   const [isForbidden, setIsForbidden] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const load = useCallback(async () => {
+  const reportRef = useRef(report);
+  useEffect(() => {
+    reportRef.current = report;
+  }, [report]);
+
+  const load = useCallback(async (forceRefresh = false) => {
     if (!token) {
       setFetching(false);
       setIsForbidden(false);
       setError("Authentication required. Please sign in.");
       return;
     }
-    setFetching(true);
+    if (!reportRef.current) setFetching(true);
     setError(null);
     setIsForbidden(false);
     try {
-      const data = await api.complianceReport(token);
+      const data = await api.complianceReport(token, forceRefresh);
       setReport(data as unknown as ComplianceReport);
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
@@ -189,14 +434,25 @@ export default function CompliancePage() {
       } else if (e instanceof ApiError && String(e.message).toLowerCase().includes("admin")) {
         setIsForbidden(true);
       } else {
-        setError(e instanceof ApiError ? e.message : "Failed to load compliance report");
+        if (!reportRef.current) setError(e instanceof ApiError ? e.message : "Failed to load compliance report");
       }
     } finally {
       setFetching(false);
     }
   }, [token]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      const isManual = reloadKey > 0;
+      await load(isManual);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, token, load]);
 
   async function handleExportJson() {
     if (!report) return;
@@ -217,20 +473,76 @@ export default function CompliancePage() {
     }
   }
 
+  async function handleExportPdf() {
+    if (!report) return;
+    setExportingPdf(true);
+    try {
+      const [{ pdf }, { ComplianceReportPdf }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("./compliance-report-pdf"),
+      ]);
+      const blob = await pdf(
+        <ComplianceReportPdf
+          report={report}
+          user={{ fullName, email, role }}
+        />
+      ).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `agentshield-article12-compliance-${report.report_id.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Compliance report (PDF) exported");
+    } catch (e) {
+      console.error(e);
+      toast.error("PDF export failed");
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   if (authLoading || fetching) {
     return (
-      <div className="space-y-6 animate-fade-in pb-10">
-        <div className="h-10 w-56 rounded-xl bg-[#E6E0D4] animate-pulse" />
-        <div className="flex gap-3">
-          <div className="h-7 w-40 rounded-lg bg-[#E6E0D4] animate-pulse" />
-          <div className="h-7 w-28 rounded-lg bg-[#E6E0D4] animate-pulse" />
+      <div className="space-y-6">
+        <div
+          style={{
+            background: "#0A0F14",
+            border: `3px solid ${BLACK}`,
+            borderRadius: "16px",
+            boxShadow: SHADOW,
+            padding: "36px",
+          }}
+        >
+          <div style={{ height: 14, width: 160, background: "#1E293B", borderRadius: 4, animation: "pulse 1.5s ease-in-out infinite" }} />
+          <div style={{ height: 44, width: 420, maxWidth: "100%", background: "#1E293B", borderRadius: 6, marginTop: 16, animation: "pulse 1.5s ease-in-out infinite" }} />
+          <div style={{ height: 16, width: 560, maxWidth: "100%", background: "#1E293B", borderRadius: 4, marginTop: 14, animation: "pulse 1.5s ease-in-out infinite" }} />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-28 rounded-2xl bg-[#E6E0D4] animate-pulse" />
+            <div
+              key={i}
+              style={{
+                height: 170,
+                background: "#fff",
+                border: `3px solid ${BLACK}`,
+                borderRadius: "14px",
+                boxShadow: SHADOW,
+                animation: "pulse 1.5s ease-in-out infinite",
+              }}
+            />
           ))}
         </div>
-        <div className="h-56 rounded-2xl bg-[#E6E0D4] animate-pulse" />
+        <div
+          style={{
+            height: 240,
+            background: "#fff",
+            border: `3px solid ${BLACK}`,
+            borderRadius: "16px",
+            boxShadow: SHADOW,
+            animation: "pulse 1.5s ease-in-out infinite",
+          }}
+        />
       </div>
     );
   }
@@ -238,83 +550,120 @@ export default function CompliancePage() {
   if (isForbidden) {
     const userRoleDisplay = role ? role.toUpperCase() : "MEMBER";
     return (
-      <div className="space-y-6 animate-slide-up pb-10">
-        <div className="pb-6 border-b border-border">
-          <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-muted-foreground font-medium mb-2">Governance &amp; Regulatory Audit</p>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+      <div className="space-y-6">
+        <div
+          style={{
+            background: "#0A0F14",
+            border: `3px solid ${BLACK}`,
+            borderRadius: "16px",
+            boxShadow: SHADOW,
+            padding: "36px",
+          }}
+        >
+          <p style={{ fontFamily: FONT_MONO, fontSize: "11px", fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "#FACC15", margin: 0 }}>
+            Governance &amp; Regulatory Audit
+          </p>
+          <h1 style={{ fontFamily: FONT_HEAD, fontSize: "44px", fontWeight: 900, letterSpacing: "-0.03em", color: "#fff", margin: "10px 0 0 0", lineHeight: 1.05 }}>
             Compliance &amp; EU AI Act
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p style={{ margin: "10px 0 0 0", fontSize: "15px", fontWeight: 600, color: "#94A3B8", maxWidth: "640px" }}>
             Automated verification for EU AI Act Article 12 high-risk AI record-keeping obligations.
           </p>
         </div>
 
-        <div className="rounded-2xl border border-amber-500/20 bg-gradient-to-b from-amber-500/5 via-card/60 to-transparent p-6 sm:p-8">
-          <div className="flex flex-col sm:flex-row items-start gap-5">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 shrink-0">
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <span className="text-[10px] font-mono tracking-widest uppercase px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 border border-amber-500/30 font-bold">
-                  Requires role admin
-                </span>
-                <span className="text-[10px] font-mono text-muted-foreground font-medium">Access Denied</span>
+        <div
+          style={{
+            background: "#FFF7E0",
+            border: `3px solid ${BLACK}`,
+            borderRadius: "16px",
+            boxShadow: SHADOW,
+            padding: "28px",
+          }}
+        >
+          <div style={{ display: "flex", gap: "16px", alignItems: "flex-start", flexWrap: "wrap" }}>
+            <span
+              style={{
+                width: "56px",
+                height: "56px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#FACC15",
+                border: `3px solid ${BLACK}`,
+                borderRadius: "14px",
+                boxShadow: SHADOW_SM,
+                fontSize: "26px",
+                flexShrink: 0,
+              }}
+            >
+              🔒
+            </span>
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
+                <Chip label="Requires role admin" bg="#FACC15" />
+                <Chip label="Access denied" bg="#fff" />
               </div>
-
-              <h2 className="text-lg font-bold text-foreground mb-2" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+              <h2 style={{ fontFamily: FONT_HEAD, fontSize: "24px", fontWeight: 900, color: BLACK, margin: "0 0 8px 0" }}>
                 Administrator Authorization Required
               </h2>
-              <p className="text-xs text-foreground leading-relaxed max-w-2xl mb-6">
-                EU AI Act Article 12 compliance reports contain organization-wide forensic chain audits, full retention telemetry, and legal compliance attestations. Access is restricted by the backend role-based access policy to organization administrators.
+              <p style={{ margin: "0 0 16px 0", fontSize: "14px", fontWeight: 600, color: "#475569", lineHeight: 1.6, maxWidth: "640px" }}>
+                EU AI Act Article 12 compliance reports contain organization-wide forensic chain audits, full
+                retention telemetry, and legal compliance attestations. Access is restricted by the backend
+                role-based access policy to organization administrators.
               </p>
 
-              <div className="rounded-xl border border-[rgba(26,26,26,0.13)] bg-[#E0D9CC] p-4 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: "12px",
+                  background: "#fff",
+                  border: `3px solid ${BLACK}`,
+                  borderRadius: "12px",
+                  boxShadow: SHADOW_SM,
+                  padding: "16px",
+                  marginBottom: "20px",
+                }}
+              >
                 <div>
-                  <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-medium block mb-1">Authenticated Account</span>
-                  <span className="text-foreground font-semibold">{fullName || email || "Current Operator"}</span>
-                  <span className="text-muted-foreground block text-[10px]">{email}</span>
+                  <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#64748B", marginBottom: "4px" }}>
+                    Authenticated Account
+                  </span>
+                  <span style={{ display: "block", fontSize: "14px", fontWeight: 900, color: BLACK, fontFamily: FONT_HEAD }}>
+                    {fullName || email || "Current Operator"}
+                  </span>
+                  <span style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748B" }}>{email}</span>
                 </div>
                 <div>
-                  <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-medium block mb-1">Assigned Role / Permission</span>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-[#E6E0D4] text-foreground border border-border text-[10px]">
-                      {userRoleDisplay}
-                    </span>
-                    <span className="text-amber-600/80 text-[10px]">→ Requires ADMIN</span>
-                  </div>
+                  <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#64748B", marginBottom: "4px" }}>
+                    Assigned Role
+                  </span>
+                  <Chip label={userRoleDisplay} bg="#E2E8F0" />
                 </div>
                 <div>
-                  <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-medium block mb-1">Regulatory Standard</span>
-                  <span className="text-foreground font-medium">EU AI Act (2024/1689) Art. 12</span>
+                  <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#64748B", marginBottom: "4px" }}>
+                    Regulatory Standard
+                  </span>
+                  <span style={{ fontSize: "13px", fontWeight: 800, color: BLACK }}>EU AI Act (2024/1689) Art. 12</span>
                 </div>
                 <div>
-                  <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-medium block mb-1">Record Retention Period</span>
-                  <span className="text-[#059669]">10 Years Enforced</span>
+                  <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#64748B", marginBottom: "4px" }}>
+                    Record Retention
+                  </span>
+                  <span style={{ fontSize: "13px", fontWeight: 900, color: "#059669", fontFamily: FONT_HEAD }}>10 Years Enforced</span>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  href="/dashboard"
-                  className="px-4 py-2 rounded-xl text-xs font-mono font-bold bg-[#E6E0D4] border border-border text-foreground hover:bg-[#E0D9CC] transition-colors"
-                >
-                  ← Back to Overview
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <Link href="/dashboard" style={{ textDecoration: "none" }}>
+                  <NeoButton variant="secondary">← Back to Overview</NeoButton>
                 </Link>
-                <Link
-                  href="/dashboard/audit"
-                  className="px-4 py-2 rounded-xl text-xs font-mono font-bold bg-[#059669]/15 border border-[#059669]/30 text-[#059669] hover:bg-[#059669]/25 transition-colors"
-                >
-                  View General Audit Trail →
+                <Link href="/dashboard/audit" style={{ textDecoration: "none" }}>
+                  <NeoButton>View General Audit Trail →</NeoButton>
                 </Link>
-                <button
-                  onClick={load}
-                  className="px-4 py-2 rounded-xl text-xs font-mono text-muted-foreground hover:text-foreground font-medium transition-colors"
-                >
+                <NeoButton variant="ghost" onClick={() => load(true)}>
                   Check Permission Again
-                </button>
+                </NeoButton>
               </div>
             </div>
           </div>
@@ -325,16 +674,25 @@ export default function CompliancePage() {
 
   if (error) {
     return (
-      <div className="space-y-6 animate-fade-in pb-10">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">Compliance Report</h1>
-        <div className="p-6 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-600 font-mono text-xs">
-          {error}
-          <button
-            onClick={load}
-            className="block mt-4 px-4 py-2 rounded-xl bg-card border border-border text-foreground hover:bg-muted font-bold"
-          >
-            Retry Request
-          </button>
+      <div className="space-y-6">
+        <h1 style={{ fontFamily: FONT_HEAD, fontSize: "40px", fontWeight: 900, letterSpacing: "-0.03em", color: BLACK, margin: 0 }}>
+          Compliance Report
+        </h1>
+        <div
+          style={{
+            background: "#FFE5E5",
+            border: `3px solid ${BLACK}`,
+            borderRadius: "16px",
+            boxShadow: SHADOW,
+            padding: "28px",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: BLACK, fontFamily: FONT_MONO }}>{error}</p>
+          <div style={{ marginTop: "16px" }}>
+            <NeoButton variant="danger" onClick={() => load(true)}>
+              Retry Request
+            </NeoButton>
+          </div>
         </div>
       </div>
     );
@@ -343,172 +701,165 @@ export default function CompliancePage() {
   if (!report) return null;
 
   return (
-    <div className="space-y-6 animate-slide-up pb-10">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-border">
-        <div>
-          <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-muted-foreground font-medium mb-2">Governance &amp; Regulatory Audit</p>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+    <div className="space-y-7">
+      {/* Hero */}
+      <div
+        style={{
+          background: "#0A0F14",
+          border: `3px solid ${BLACK}`,
+          borderRadius: "16px",
+          boxShadow: SHADOW,
+          padding: "32px 36px",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: "20px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontFamily: FONT_MONO, fontSize: "11px", fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "#FACC15", margin: 0 }}>
+            Governance &amp; Regulatory Audit
+          </p>
+          <h1 style={{ fontFamily: FONT_HEAD, fontSize: "44px", fontWeight: 900, letterSpacing: "-0.03em", color: "#fff", margin: "10px 0 0 0", lineHeight: 1.05 }}>
             Compliance &amp; EU AI Act
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p style={{ margin: "10px 0 0 0", fontSize: "15px", fontWeight: 600, color: "#94A3B8", maxWidth: "640px" }}>
             Article 12 automated logging, cryptographic non-repudiation, and tamper-evident audit.
           </p>
         </div>
-
-        <button
-          onClick={handleExportJson}
-          disabled={exporting}
-          className="px-4 py-2.5 rounded-xl text-xs font-mono font-bold bg-[#059669] text-black hover:bg-[#10B981] transition-all flex items-center gap-2 self-start sm:self-auto shadow-sm cursor-pointer"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-          </svg>
-          {exporting ? "Exporting..." : "Export Compliance JSON"}
-        </button>
+        <div style={{ display: "flex", gap: "10px", flexShrink: 0, flexWrap: "wrap" }}>
+          <NeoButton variant="secondary" onClick={() => setReloadKey((k) => k + 1)} disabled={fetching}>
+            <svg className={fetching ? "animate-spin" : ""} width="15" height="15" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+            Refresh
+          </NeoButton>
+          <NeoButton onClick={handleExportPdf} disabled={exportingPdf} variant="secondary" testid="export-pdf">
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5A3.375 3.375 0 0010.125 2.25H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+            </svg>
+            {exportingPdf ? "Generating…" : "Export PDF Report"}
+          </NeoButton>
+          <NeoButton onClick={handleExportJson} disabled={exporting}>
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            {exporting ? "Exporting…" : "Export JSON"}
+          </NeoButton>
+        </div>
       </div>
 
-      {/* Compliance status banner with explanation badges */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div
+      {/* Status chips */}
+      <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+        <Chip
+          label={`Article 12: ${report.article_12_satisfied ? "Satisfied" : "Unsatisfied"} · Why?`}
+          bg={report.article_12_satisfied ? "#2DD4A0" : "#FF4D4D"}
           onClick={() => setActiveModal("article_12_info")}
-          className={`cursor-pointer inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold tracking-wider uppercase border transition-all hover:scale-105 ${
-            report.article_12_satisfied
-              ? "bg-[#059669]/15 text-[#059669] border-[#059669]/40 shadow-sm"
-              : "bg-rose-500/15 text-rose-600 border-rose-500/40 shadow-sm"
-          }`}
-        >
-          <div className={`w-2 h-2 rounded-full ${report.article_12_satisfied ? "bg-[#059669] animate-pulse" : "bg-rose-500"}`} />
-          Article 12: {report.article_12_satisfied ? "Satisfied" : "Unsatisfied"}
-          <span className="text-[10px] opacity-70 underline ml-1">Why?</span>
-        </div>
-
-        <div
+          title="Learn what Article 12 requires"
+        />
+        <Chip
+          label={`Status: ${report.compliance_status} · Meaning`}
+          bg="#FACC15"
           onClick={() => setActiveModal("compliance_status_info")}
-          className="cursor-pointer inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold tracking-wider uppercase bg-[#E6E0D4] text-foreground border border-border hover:bg-[#DDD6C8] transition-all"
-        >
-          Status: {report.compliance_status}
-          <span className="text-[10px] opacity-70 underline ml-1">Meaning</span>
-        </div>
-
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono text-muted-foreground border border-border bg-[#EFEBE4]">
-          Report ID: <span className="font-semibold text-foreground font-mono">{report.report_id.slice(0, 8)}...{report.report_id.slice(-4)}</span>
-        </div>
+          title="How is this calculated?"
+        />
+        <Chip
+          label={`Report ${report.report_id.slice(0, 8)}…${report.report_id.slice(-4)}`}
+          bg="#fff"
+          title={report.report_id}
+        />
       </div>
 
-      {/* Primary KPI Grid with Explanations */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div
+      {/* KPI cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <KpiCard
+          value={report.total_events}
+          label="Total Audit Events"
+          sublabel="Cryptographically hash-linked"
+          icon="📊"
+          accent="#2DD4A0"
           onClick={() => setActiveModal("total_events_info")}
-          className="panel-card p-5 transition-all hover:border-[#059669]/60 hover:shadow-md cursor-pointer group relative"
-        >
-          <div className="flex items-center justify-between">
-            <div className="text-3xl font-extrabold font-mono text-foreground" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-              {report.total_events}
-            </div>
-            <span className="text-xl group-hover:scale-125 transition-transform">📊</span>
-          </div>
-          <div className="text-[11px] font-mono font-bold tracking-wider uppercase text-foreground mt-1">Total Audit Events</div>
-          <div className="text-[11px] font-mono text-[#059669] mt-1 font-semibold flex items-center gap-1">
-            <span>●</span> Cryptographically Hash-Linked
-          </div>
-          <p className="text-xs text-muted-foreground mt-3 leading-relaxed border-t border-border/60 pt-2.5">
-            Every memory store, constraint pin, and scan block recorded in sequence.
-          </p>
-          <div className="mt-2 text-[10px] font-mono text-[#059669] font-bold underline opacity-0 group-hover:opacity-100 transition-opacity">
-            Click to see full breakdown →
-          </div>
-        </div>
-
-        <div
+          hint="Every memory store, constraint pin, and scan block recorded in sequence."
+        />
+        <KpiCard
+          value={`${report.retention_years} Years`}
+          label="Retention Window"
+          sublabel="EU high-risk AI mandate"
+          icon="⚖️"
+          accent="#FACC15"
           onClick={() => setActiveModal("retention_info")}
-          className="panel-card p-5 transition-all hover:border-[#059669]/60 hover:shadow-md cursor-pointer group relative"
-        >
-          <div className="flex items-center justify-between">
-            <div className="text-3xl font-extrabold font-mono text-[#059669]" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-              {report.retention_years} Years
-            </div>
-            <span className="text-xl group-hover:scale-125 transition-transform">⚖️</span>
-          </div>
-          <div className="text-[11px] font-mono font-bold tracking-wider uppercase text-foreground mt-1">Retention Window</div>
-          <div className="text-[11px] font-mono text-muted-foreground font-semibold mt-1 flex items-center gap-1">
-            <span>●</span> EU High-Risk AI Mandate
-          </div>
-          <p className="text-xs text-muted-foreground mt-3 leading-relaxed border-t border-border/60 pt-2.5">
-            Meets EU AI Act Article 18 standards requiring high-risk AI logs be preserved for legal review.
-          </p>
-          <div className="mt-2 text-[10px] font-mono text-[#059669] font-bold underline opacity-0 group-hover:opacity-100 transition-opacity">
-            Click for legal requirements →
-          </div>
-        </div>
-
-        <div
+          hint="Meets EU AI Act standards requiring high-risk AI logs be preserved for legal review."
+        />
+        <KpiCard
+          value="100%"
+          label="Audit Trail Completeness"
+          sublabel="Zero unchained events"
+          icon="🛡️"
+          accent="#4D9FFF"
           onClick={() => setActiveModal("completeness_info")}
-          className="panel-card p-5 transition-all hover:border-[#0284C7]/60 hover:shadow-md cursor-pointer group relative"
-        >
-          <div className="flex items-center justify-between">
-            <div className="text-3xl font-extrabold font-mono text-[#0284C7]" style={{ fontFamily: "var(--font-space-grotesk)" }}>
-              100%
-            </div>
-            <span className="text-xl group-hover:scale-125 transition-transform">🛡️</span>
-          </div>
-          <div className="text-[11px] font-mono font-bold tracking-wider uppercase text-foreground mt-1">Audit Trail Completeness</div>
-          <div className="text-[11px] font-mono text-muted-foreground font-semibold mt-1 flex items-center gap-1">
-            <span>●</span> Zero unchained events
-          </div>
-          <p className="text-xs text-muted-foreground mt-3 leading-relaxed border-t border-border/60 pt-2.5">
-            100% of operations have a verified parent hash. No orphan or unmonitored agent activity.
-          </p>
-          <div className="mt-2 text-[10px] font-mono text-[#0284C7] font-bold underline opacity-0 group-hover:opacity-100 transition-opacity">
-            Click to verify chain coverage →
-          </div>
-        </div>
+          hint="100% of operations have a verified parent hash. No orphan or unmonitored agent activity."
+        />
       </div>
 
-      {/* Hash chain verification details */}
-      <div className="panel-card p-6">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#059669]" />
-            <h2 className="text-xs font-mono font-bold tracking-[0.15em] uppercase text-foreground">
-              Hash Chain Verification &amp; Evidence
-            </h2>
-          </div>
-          <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-[#059669]/10 text-[#059669] border border-[#059669]/20">
-            SHA-256 Mathematical Proof
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-          The hash chain calculates <code>SHA-256(prev_hash + entry_data)</code> on every transaction. If any database entry is altered, inserted, or removed, the verification check fails mathematically.
+      {/* Hash chain verification */}
+      <Panel
+        title="Hash Chain Verification & Evidence"
+        description="SHA-256 mathematical proof — if any entry is altered, verification fails"
+        accent="#2DD4A0"
+        action={<Chip label="SHA-256 Proof" bg="#fff" />}
+      >
+        <p style={{ margin: "0 0 16px 0", fontSize: "13px", fontWeight: 600, color: "#475569", lineHeight: 1.6 }}>
+          The hash chain calculates <code style={{ fontFamily: FONT_MONO, fontWeight: 800, background: "#F1F5F9", border: `2px solid ${BLACK}`, borderRadius: "5px", padding: "1px 6px" }}>SHA-256(prev_hash + entry_data)</code>{" "}
+          on every transaction. If any database entry is altered, inserted, or removed, the verification check
+          fails mathematically.
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {Object.entries(report.hash_chain).map(([key, value]) => {
             const isVal = key.toLowerCase() === "valid";
             const isValidBool = value === true || String(value) === "true";
+            const displayKey = key === "valid" ? "Chain Integrity Status" : key === "length" ? "Total Chained Blocks" : key;
             return (
-              <div
+              <button
                 key={key}
+                type="button"
                 onClick={() => setActiveModal(isVal ? "chain_integrity_modal" : "chain_length_modal")}
-                className="rounded-xl border border-[rgba(26,26,26,0.13)] bg-[#E6E0D4] p-4 transition-all hover:bg-[#DDD6C8] hover:border-[#059669]/50 cursor-pointer group"
+                style={{
+                  textAlign: "left",
+                  background: isVal ? (isValidBool ? "#D9FFF0" : "#FFE5E5") : "#F8FAFC",
+                  border: `3px solid ${BLACK}`,
+                  borderRadius: "12px",
+                  boxShadow: `3px 3px 0px ${BLACK}`,
+                  padding: "16px",
+                  cursor: "pointer",
+                  transform: "translate(-1px, -1px)",
+                }}
               >
-                <div className="flex items-center justify-between">
-                  <div className="text-[10px] font-mono font-bold tracking-wider uppercase text-muted-foreground">
-                    {key === "valid" ? "Chain Integrity Status" : key === "length" ? "Total Chained Blocks" : key}
-                  </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                  <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>
+                    {displayKey}
+                  </span>
                   {isVal ? (
-                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${isValidBool ? "bg-emerald-500/20 text-emerald-800 border border-emerald-600/30" : "bg-rose-500/20 text-rose-800 border border-rose-600/30"}`}>
-                      {isValidBool ? "INTACT" : "FAILED"}
-                    </span>
+                    <Chip label={isValidBool ? "Intact" : "Failed"} bg={isValidBool ? "#2DD4A0" : "#FF4D4D"} />
                   ) : (
-                    <span className="text-[10px] font-mono text-[#059669] font-bold underline opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: BLACK, opacity: 0.45 }}>
                       Explain →
                     </span>
                   )}
                 </div>
-                <div className={`text-xl font-mono font-extrabold mt-1.5 ${isVal ? (isValidBool ? "text-emerald-700" : "text-rose-700") : "text-foreground"}`}>
+                <div
+                  style={{
+                    fontFamily: FONT_HEAD,
+                    fontSize: "26px",
+                    fontWeight: 900,
+                    letterSpacing: "-0.02em",
+                    color: BLACK,
+                    marginTop: "8px",
+                  }}
+                >
                   {String(value)}
                 </div>
-                <p className="text-xs text-muted-foreground mt-2 leading-relaxed border-t border-border/40 pt-2">
+                <p style={{ margin: "10px 0 0 0", fontSize: "12px", fontWeight: 600, color: "#475569", lineHeight: 1.5, borderTop: `2px solid ${BLACK}`, paddingTop: "8px" }}>
                   {key === "valid"
                     ? isValidBool
                       ? "Unbroken cryptographic link from genesis seed to latest event. Mathematical proof of zero tampering."
@@ -517,225 +868,369 @@ export default function CompliancePage() {
                     ? "Continuous sequence of cryptographically linked ledger entries in forward sequence."
                     : "Cryptographic parameter."}
                 </p>
-              </div>
+              </button>
             );
           })}
         </div>
-      </div>
+      </Panel>
 
-      {/* Events breakdown with Interactive Cards and Deep Explanations */}
+      {/* Events by category */}
       {Object.keys(report.events_by_type).length > 0 && (
-        <div className="panel-card p-6">
-          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-[#0284C7]" />
-              <h2 className="text-xs font-mono font-bold tracking-[0.15em] uppercase text-foreground">
-                Audited Events By Category
-              </h2>
-            </div>
-            <span className="text-[11px] font-mono text-[#059669] font-bold">
-              Click any card to read why this number exists →
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground mb-4">
+        <Panel
+          title="Audited Events By Category"
+          description="Click any card to read why this number exists"
+          accent="#4D9FFF"
+          action={<Chip label={`${report.total_events} total`} bg="#fff" />}
+        >
+          <p style={{ margin: "0 0 16px 0", fontSize: "13px", fontWeight: 600, color: "#475569" }}>
             Categorized distribution of all transactions intercepted, validated, and hash-chained by AgentShield:
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
             {Object.entries(report.events_by_type).map(([eventType, count]) => {
               const meta = getEventMeta(eventType);
-
               return (
-                <div
+                <button
                   key={eventType}
+                  type="button"
                   onClick={() => setActiveModal(eventType)}
-                  className="rounded-xl border border-[rgba(26,26,26,0.13)] bg-[#E6E0D4] p-4 cursor-pointer transition-all hover:bg-[#E0D9CC] hover:border-[#059669] hover:shadow-md group relative"
-                  style={{ borderLeft: `4px solid ${meta.color}` }}
+                  style={{
+                    textAlign: "left",
+                    background: "#fff",
+                    border: `3px solid ${BLACK}`,
+                    borderRadius: "12px",
+                    boxShadow: `3px 3px 0px ${BLACK}`,
+                    padding: "16px",
+                    cursor: "pointer",
+                    borderTop: `8px solid ${meta.color}`,
+                    transform: "translate(-1px, -1px)",
+                    transition: "transform 100ms, box-shadow 100ms",
+                  }}
+                  onMouseDown={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.transform = "translate(2px, 2px)";
+                    (e.currentTarget as HTMLButtonElement).style.boxShadow = "1px 1px 0px #000";
+                  }}
+                  onMouseUp={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.transform = "translate(-1px, -1px)";
+                    (e.currentTarget as HTMLButtonElement).style.boxShadow = `3px 3px 0px ${BLACK}`;
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.transform = "translate(-1px, -1px)";
+                    (e.currentTarget as HTMLButtonElement).style.boxShadow = `3px 3px 0px ${BLACK}`;
+                  }}
                 >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded" style={{ background: meta.accentBg, color: meta.color, border: `1px solid ${meta.accentBorder}` }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          fontFamily: FONT_HEAD,
+                          fontSize: "9px",
+                          fontWeight: 900,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          background: meta.color,
+                          color: BLACK,
+                          border: `2px solid ${BLACK}`,
+                          borderRadius: "6px",
+                          padding: "2px 7px",
+                          boxShadow: `2px 2px 0px ${BLACK}`,
+                        }}
+                      >
                         {meta.tag}
                       </span>
-                      <div className="text-2xl font-black font-mono text-foreground mt-2">{count}</div>
+                      <div style={{ fontFamily: FONT_HEAD, fontSize: "32px", fontWeight: 900, letterSpacing: "-0.02em", color: BLACK, marginTop: "10px", lineHeight: 1 }}>
+                        {count}
+                      </div>
                     </div>
-                    <span className="text-2xl group-hover:scale-125 transition-transform">{meta.icon}</span>
+                    <span style={{ fontSize: "26px", flexShrink: 0 }}>{meta.icon}</span>
                   </div>
-
-                  <div className="text-xs font-mono font-bold uppercase tracking-wider text-foreground mt-2">
+                  <div style={{ fontFamily: FONT_MONO, fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "#64748B", marginTop: "10px" }}>
                     {eventType}
                   </div>
-                  <div className="text-xs font-semibold mt-0.5" style={{ color: meta.color }}>
+                  <div style={{ fontFamily: FONT_HEAD, fontSize: "13px", fontWeight: 900, color: BLACK, marginTop: "2px" }}>
                     {meta.title}
                   </div>
-
-                  {/* Clean explanation inside the card */}
-                  <p className="text-xs text-muted-foreground mt-2.5 leading-relaxed border-t border-border/40 pt-2 line-clamp-2">
+                  <p style={{ margin: "10px 0 0 0", fontSize: "12px", fontWeight: 600, color: "#475569", lineHeight: 1.5, borderTop: `2px solid ${BLACK}`, paddingTop: "8px" }}>
                     {meta.desc}
                   </p>
-
-                  <div className="mt-2.5 flex items-center justify-between text-[11px] font-mono font-bold" style={{ color: meta.color }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "10px", fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: BLACK }}>
                     <span>Why {count}?</span>
-                    <span className="group-hover:translate-x-1 transition-transform">Read Details →</span>
+                    <span style={{ opacity: 0.55 }}>Read details →</span>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
-        </div>
+        </Panel>
       )}
 
-      {/* Constraint & alert summary with Meaning */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="panel-card p-6">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2 h-2 rounded-full bg-[#059669]" />
-            <h2 className="text-xs font-mono font-bold tracking-[0.15em] uppercase text-foreground">
-              Constraint Summary
-            </h2>
-          </div>
-          <p className="text-xs text-muted-foreground mb-4">
-            Authoritative rules pinned to prevent model drift and context compaction erasure:
-          </p>
-          <div className="space-y-3">
+      {/* Constraint + Alert summaries */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Panel title="Constraint Summary" description="Authoritative rules pinned to prevent model drift" accent="#2DD4A0">
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {Object.entries(report.constraint_summary).map(([key, value]) => (
-              <div key={key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                <div>
-                  <span className="text-xs font-mono text-foreground font-semibold uppercase tracking-wider block">
+              <div
+                key={key}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  background: "#F8FAFC",
+                  border: `3px solid ${BLACK}`,
+                  borderRadius: "10px",
+                  boxShadow: `2px 2px 0px ${BLACK}`,
+                  padding: "12px 14px",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "12px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: BLACK }}>
                     {key.replace(/_/g, " ")}
                   </span>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748B" }}>
                     {key === "active" ? "Enforced on every Groq token stream" : key === "total" ? "Historical registered policies" : "Policy metric"}
                   </span>
                 </div>
-                <span className="text-sm font-mono font-bold text-[#059669] bg-[#059669]/10 px-2.5 py-1 rounded-lg border border-[#059669]/20">
-                  {String(value)}
-                </span>
+                <Chip label={String(value)} bg="#2DD4A0" />
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
 
-        <div className="panel-card p-6">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2 h-2 rounded-full bg-[#D97706]" />
-            <h2 className="text-xs font-mono font-bold tracking-[0.15em] uppercase text-foreground">
-              Alert Summary
-            </h2>
-          </div>
-          <p className="text-xs text-muted-foreground mb-4">
-            Security incidents intercepted before reaching backend systems or models:
-          </p>
-          <div className="space-y-3">
+        <Panel title="Alert Summary" description="Security incidents intercepted before reaching models" accent="#FACC15">
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {Object.entries(report.alert_summary).map(([key, value]) => (
-              <div key={key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                <div>
-                  <span className="text-xs font-mono text-foreground font-semibold uppercase tracking-wider block">
+              <div
+                key={key}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  background: "#F8FAFC",
+                  border: `3px solid ${BLACK}`,
+                  borderRadius: "10px",
+                  boxShadow: `2px 2px 0px ${BLACK}`,
+                  padding: "12px 14px",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "12px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: BLACK }}>
                     {key.replace(/_/g, " ")}
                   </span>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748B" }}>
                     {key === "total" ? "Total security alerts logged" : "Active security incidents"}
                   </span>
                 </div>
-                <span className="text-sm font-mono font-bold text-[#D97706] bg-[#D97706]/10 px-2.5 py-1 rounded-lg border border-[#D97706]/20">
-                  {String(value)}
-                </span>
+                <Chip label={String(value)} bg="#FACC15" />
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
       </div>
 
-      <div className="text-[11px] font-mono text-muted-foreground pt-2 flex items-center justify-between flex-wrap gap-2">
+      {/* Footer */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "12px",
+          flexWrap: "wrap",
+          fontFamily: FONT_MONO,
+          fontSize: "12px",
+          fontWeight: 700,
+          color: "#64748B",
+        }}
+      >
         <span>Generated: {new Date(report.generated_at).toLocaleString()}</span>
-        <span className="text-[#059669] font-semibold">✓ Cryptographic report digest verified &amp; signed</span>
+        <Chip label="✓ Report digest verified & signed" bg="#2DD4A0" />
       </div>
 
-      {/* POPUP EXPLANATION MODAL (Opens when clicking any number or card) */}
+      {/* Explanation modal */}
       {activeModal && (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 md:p-10 bg-black/75 backdrop-blur-md"
-          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, width: "100vw", height: "100vh" }}
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 md:p-10"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: "100vw",
+            height: "100vh",
+            background: "rgba(0,0,0,0.75)",
+          }}
           onClick={() => setActiveModal(null)}
         >
           <div
-            className="max-w-2xl sm:max-w-3xl w-full max-h-[88vh] overflow-y-auto p-7 sm:p-9 bg-[#F4EFE6] border-2 border-[#1A1A1A] shadow-2xl rounded-3xl relative text-foreground m-auto"
-            style={{ transform: "none" }}
+            style={{
+              maxWidth: "720px",
+              width: "100%",
+              maxHeight: "85vh",
+              overflowY: "auto",
+              background: "#FFFFFF",
+              border: `3px solid ${BLACK}`,
+              borderRadius: "16px",
+              boxShadow: `8px 8px 0px ${BLACK}`,
+              padding: "28px",
+              position: "relative",
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={() => setActiveModal(null)}
-              className="absolute top-5 right-5 w-10 h-10 rounded-full bg-[#E0D9CC] border border-border flex items-center justify-center text-foreground hover:bg-[#D4CCBE] font-bold text-base cursor-pointer shadow-sm"
+              aria-label="Close"
+              style={{
+                position: "absolute",
+                top: "16px",
+                right: "16px",
+                width: "40px",
+                height: "40px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#FF4D4D",
+                border: `3px solid ${BLACK}`,
+                borderRadius: "10px",
+                boxShadow: `2px 2px 0px ${BLACK}`,
+                fontFamily: FONT_HEAD,
+                fontWeight: 900,
+                fontSize: "16px",
+                color: BLACK,
+                cursor: "pointer",
+              }}
             >
               ✕
             </button>
 
-            {/* Content for Category Cards */}
-            {activeModal && activeModal in report.events_by_type ? (
+            {activeModal in report.events_by_type ? (
               (() => {
                 const meta = getEventMeta(activeModal);
                 const count = report.events_by_type[activeModal] ?? 0;
                 return (
                   <div>
-                    <div className="flex items-center gap-4 mb-5">
-                      <span className="text-4xl sm:text-5xl">{meta.icon}</span>
+                    <div style={{ display: "flex", gap: "16px", alignItems: "center", marginBottom: "20px", paddingRight: "44px" }}>
+                      <span
+                        style={{
+                          width: "64px",
+                          height: "64px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "32px",
+                          background: meta.color,
+                          border: `3px solid ${BLACK}`,
+                          borderRadius: "14px",
+                          boxShadow: SHADOW_SM,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {meta.icon}
+                      </span>
                       <div>
-                        <span className="text-xs font-mono font-bold uppercase tracking-wider px-3 py-1 rounded" style={{ background: meta.accentBg, color: meta.color, border: `1px solid ${meta.accentBorder}` }}>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            fontFamily: FONT_HEAD,
+                            fontSize: "10px",
+                            fontWeight: 900,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            background: meta.color,
+                            color: BLACK,
+                            border: `2px solid ${BLACK}`,
+                            borderRadius: "6px",
+                            padding: "3px 8px",
+                            boxShadow: `2px 2px 0px ${BLACK}`,
+                          }}
+                        >
                           {meta.tag}
                         </span>
-                        <h3 className="text-2xl sm:text-3xl font-extrabold text-foreground mt-1.5" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+                        <h3 style={{ fontFamily: FONT_HEAD, fontSize: "26px", fontWeight: 900, letterSpacing: "-0.02em", color: BLACK, margin: "8px 0 0 0", lineHeight: 1.15 }}>
                           {meta.title}
                         </h3>
                       </div>
                     </div>
 
-                    <div className="my-5 p-5 sm:p-6 rounded-2xl bg-[#E6E0D4] border border-border">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground font-semibold">Active Event Count</div>
-                        <span className="text-xs font-mono font-bold px-2.5 py-1 rounded bg-[#059669]/15 text-[#059669] border border-[#059669]/30">
-                          {report.total_events > 0 ? ((count / report.total_events) * 100).toFixed(1) : 0}% of all events
+                    <div
+                      style={{
+                        background: "#F8FAFC",
+                        border: `3px solid ${BLACK}`,
+                        borderRadius: "12px",
+                        boxShadow: `2px 2px 0px ${BLACK}`,
+                        padding: "16px",
+                        marginBottom: "20px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>
+                          Active Event Count
                         </span>
+                        <Chip
+                          label={`${report.total_events > 0 ? ((count / report.total_events) * 100).toFixed(1) : 0}% of all events`}
+                          bg="#2DD4A0"
+                        />
                       </div>
-                      <div className="text-4xl sm:text-5xl font-black font-mono text-foreground mt-1.5">{count} Intercepted</div>
-                      <p className="text-xs text-muted-foreground font-mono mt-2 pt-2 border-t border-border/50">
+                      <div style={{ fontFamily: FONT_HEAD, fontSize: "40px", fontWeight: 900, letterSpacing: "-0.02em", color: BLACK, marginTop: "8px", lineHeight: 1 }}>
+                        {count} Intercepted
+                      </div>
+                      <p style={{ margin: "10px 0 0 0", fontSize: "12px", fontWeight: 700, color: "#64748B", fontFamily: FONT_MONO, borderTop: `2px solid ${BLACK}`, paddingTop: "8px" }}>
                         Increments live (+1) each time a <strong>{activeModal}</strong> operation occurs.
                       </p>
                     </div>
 
-                    <div className="space-y-4 text-sm sm:text-base leading-relaxed text-foreground">
+                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                       <div>
-                        <span className="font-bold block text-muted-foreground uppercase text-xs font-mono tracking-wider">What happened to produce this count?</span>
-                        <p className="mt-1">{meta.desc}</p>
+                        <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "12px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "6px" }}>
+                          What happened to produce this count?
+                        </span>
+                        <p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: BLACK, lineHeight: 1.6 }}>{meta.desc}</p>
                       </div>
 
-                      <div className="p-4 rounded-xl bg-[#E6E0D4] border border-border">
-                        <span className="font-bold block text-foreground uppercase text-xs font-mono tracking-wider">Why is this number exactly {count}?</span>
-                        <p className="mt-1 text-foreground font-medium leading-relaxed">{meta.whyThisNumber}</p>
-                        <p className="mt-2 text-xs text-muted-foreground font-mono">
-                          Each of the {count} transactions was verified by AgentShield's middleware and chained with a SHA-256 parent link.
+                      <div
+                        style={{
+                          background: "#FFF7E0",
+                          border: `3px solid ${BLACK}`,
+                          borderRadius: "12px",
+                          boxShadow: `2px 2px 0px ${BLACK}`,
+                          padding: "16px",
+                        }}
+                      >
+                        <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "12px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: BLACK, marginBottom: "6px" }}>
+                          Why is this number exactly {count}?
+                        </span>
+                        <p style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: BLACK, lineHeight: 1.6 }}>{meta.whyThisNumber}</p>
+                        <p style={{ margin: "8px 0 0 0", fontSize: "12px", fontWeight: 600, color: "#64748B", fontFamily: FONT_MONO }}>
+                          Each of the {count} transactions was verified by AgentShield&apos;s middleware and chained with a SHA-256 parent link.
                         </p>
                       </div>
 
-                      <div className="p-4 sm:p-5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-950">
-                        <span className="font-bold block text-emerald-800 uppercase text-xs font-mono tracking-wider">EU AI Act &amp; Compliance Context</span>
-                        <p className="mt-1.5 font-medium">{meta.legalRelevance}</p>
+                      <div
+                        style={{
+                          background: "#D9FFF0",
+                          border: `3px solid ${BLACK}`,
+                          borderRadius: "12px",
+                          boxShadow: `2px 2px 0px ${BLACK}`,
+                          padding: "16px",
+                        }}
+                      >
+                        <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "12px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: BLACK, marginBottom: "6px" }}>
+                          EU AI Act &amp; Compliance Context
+                        </span>
+                        <p style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: BLACK, lineHeight: 1.6 }}>{meta.legalRelevance}</p>
                       </div>
                     </div>
 
-                    <div className="mt-8 flex justify-end">
-                      <button
-                        onClick={() => setActiveModal(null)}
-                        className="px-7 py-3 rounded-xl text-sm font-mono font-bold bg-[#059669] text-black hover:bg-[#10B981] transition-all shadow-md cursor-pointer"
-                      >
-                        Close
-                      </button>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "24px" }}>
+                      <NeoButton onClick={() => setActiveModal(null)}>Close</NeoButton>
                     </div>
                   </div>
                 );
               })()
             ) : (
-              /* Content for Top Badges / KPIs */
               <div>
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-foreground mb-4" style={{ fontFamily: "var(--font-space-grotesk)" }}>
+                <h3 style={{ fontFamily: FONT_HEAD, fontSize: "26px", fontWeight: 900, letterSpacing: "-0.02em", color: BLACK, margin: "0 44px 16px 0", lineHeight: 1.15 }}>
                   {activeModal === "article_12_info" && "Understanding Article 12 Compliance"}
                   {activeModal === "compliance_status_info" && "Compliance Status: How It's Calculated"}
                   {activeModal === "total_events_info" && "Why Total Events Matter"}
@@ -745,12 +1240,29 @@ export default function CompliancePage() {
                   {activeModal === "chain_length_modal" && "Sequential Hash Length"}
                 </h3>
 
-                <div className="space-y-4 text-sm sm:text-base leading-relaxed text-foreground">
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px", fontSize: "14px", fontWeight: 600, color: BLACK, lineHeight: 1.65 }}>
                   {activeModal === "article_12_info" && (
                     <>
-                      <p><strong>EU AI Act Article 12 (Record-Keeping)</strong> requires that providers of high-risk AI systems implement automated logging capabilities throughout the system's lifetime.</p>
-                      <p>AgentShield meets this by generating continuous, tamper-evident logs of every memory operation, user interaction, and security rule enforcement.</p>
-                      <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-950 font-mono text-xs sm:text-sm">
+                      <p style={{ margin: 0 }}>
+                        <strong>EU AI Act Article 12 (Record-Keeping)</strong> requires that providers of high-risk
+                        AI systems implement automated logging capabilities throughout the system&apos;s lifetime.
+                      </p>
+                      <p style={{ margin: 0 }}>
+                        AgentShield meets this by generating continuous, tamper-evident logs of every memory
+                        operation, user interaction, and security rule enforcement.
+                      </p>
+                      <div
+                        style={{
+                          background: "#D9FFF0",
+                          border: `3px solid ${BLACK}`,
+                          borderRadius: "12px",
+                          boxShadow: `2px 2px 0px ${BLACK}`,
+                          padding: "14px",
+                          fontFamily: FONT_MONO,
+                          fontSize: "13px",
+                          fontWeight: 700,
+                        }}
+                      >
                         Requirement: Automated logging + Tamper-evident trail + 10-year retention = COMPLIANT
                       </div>
                     </>
@@ -758,103 +1270,160 @@ export default function CompliancePage() {
 
                   {activeModal === "compliance_status_info" && (
                     <>
-                      <p>The status is calculated deterministically from two verifiable conditions:</p>
-                      <ol className="list-decimal pl-5 space-y-1.5 mt-2">
+                      <p style={{ margin: 0 }}>The status is calculated deterministically from two verifiable conditions:</p>
+                      <ol style={{ margin: 0, paddingLeft: "22px", display: "flex", flexDirection: "column", gap: "6px" }}>
                         <li><strong>Hash Chain Valid:</strong> No discrepancies detected in historical record hashes.</li>
                         <li><strong>Retention Policy Active:</strong> All operations are configured for long-term retention.</li>
                       </ol>
-                      <p className="mt-3 text-muted-foreground">If a single record in your database is tampered with, this status immediately flips to <strong>NON_COMPLIANT</strong>.</p>
+                      <p style={{ margin: 0, color: "#475569" }}>
+                        If a single record in your database is tampered with, this status immediately flips to{" "}
+                        <strong>NON_COMPLIANT</strong>.
+                      </p>
                     </>
                   )}
 
                   {activeModal === "total_events_info" && (
                     <>
-                      <div className="p-5 rounded-2xl bg-[#E6E0D4] border border-border mb-4">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">Mathematical Exact Sum</span>
-                          <span className="text-3xl font-black font-mono text-[#059669]">{report.total_events} TOTAL</span>
+                      <div
+                        style={{
+                          background: "#F8FAFC",
+                          border: `3px solid ${BLACK}`,
+                          borderRadius: "12px",
+                          boxShadow: `2px 2px 0px ${BLACK}`,
+                          padding: "16px",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: FONT_HEAD, fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569" }}>
+                            Mathematical Exact Sum
+                          </span>
+                          <span style={{ fontFamily: FONT_HEAD, fontSize: "28px", fontWeight: 900, color: BLACK }}>
+                            {report.total_events} TOTAL
+                          </span>
                         </div>
-                        <p className="text-xs text-foreground mt-2 leading-relaxed font-mono">
-                          Why exactly <strong>{report.total_events}</strong>? Because it is the exact sum of all categorized transactions logged in the database:
+                        <p style={{ margin: "10px 0 0 0", fontSize: "13px", fontWeight: 600, color: BLACK, lineHeight: 1.55 }}>
+                          Why exactly <strong>{report.total_events}</strong>? Because it is the exact sum of all
+                          categorized transactions logged in the database:
                         </p>
-                        <div className="mt-3.5 space-y-2 font-mono text-xs border-t border-border/60 pt-3">
+                        <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "12px", borderTop: `2px solid ${BLACK}`, paddingTop: "10px" }}>
                           {Object.entries(report.events_by_type).map(([evt, cnt]) => {
                             const meta = getEventMeta(evt);
                             const percentage = report.total_events > 0 ? ((cnt / report.total_events) * 100).toFixed(1) : "0";
                             return (
-                              <div key={evt} className="flex items-center justify-between py-2 border-b border-border/40 last:border-0 hover:bg-[#DDD6C8]/60 px-2 rounded-lg transition-colors cursor-pointer" onClick={() => setActiveModal(evt)}>
-                                <div className="flex items-center gap-2.5">
-                                  <span className="text-base">{meta.icon}</span>
-                                  <div>
-                                    <span className="font-bold text-foreground text-xs block">{meta.title}</span>
-                                    <span className="text-[10px] text-muted-foreground block font-mono">Database key: <code>{evt}</code></span>
+                              <button
+                                key={evt}
+                                type="button"
+                                onClick={() => setActiveModal(evt)}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: "10px",
+                                  background: "#fff",
+                                  border: `2px solid ${BLACK}`,
+                                  borderRadius: "8px",
+                                  padding: "8px 10px",
+                                  cursor: "pointer",
+                                  textAlign: "left",
+                                  width: "100%",
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                                  <span style={{ fontSize: "16px" }}>{meta.icon}</span>
+                                  <div style={{ minWidth: 0 }}>
+                                    <span style={{ display: "block", fontSize: "13px", fontWeight: 900, color: BLACK, fontFamily: FONT_HEAD }}>{meta.title}</span>
+                                    <span style={{ display: "block", fontSize: "10px", fontWeight: 700, color: "#64748B", fontFamily: FONT_MONO }}>{evt}</span>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                  <span className="font-mono font-black text-foreground text-sm">{cnt}</span>
-                                  <span className="text-[11px] font-mono text-emerald-800 font-bold w-14 text-right">({percentage}%)</span>
-                                  <span className="text-[10px] text-muted-foreground font-mono underline">Explain →</span>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                                  <span style={{ fontFamily: FONT_HEAD, fontWeight: 900, fontSize: "14px", color: BLACK }}>{cnt}</span>
+                                  <span style={{ fontFamily: FONT_MONO, fontWeight: 800, fontSize: "11px", color: "#475569", width: "46px", textAlign: "right" }}>({percentage}%)</span>
                                 </div>
-                              </div>
+                              </button>
                             );
                           })}
-                          <div className="flex items-center justify-between pt-2 text-xs font-bold text-[#059669] border-t border-border">
-                            <span>= TOTAL AUDIT LEDGER ENTRIES:</span>
-                            <span className="text-base">{report.total_events}</span>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "8px", borderTop: `2px solid ${BLACK}`, fontFamily: FONT_HEAD, fontWeight: 900, fontSize: "13px", color: BLACK }}>
+                            <span>TOTAL AUDIT LEDGER ENTRIES:</span>
+                            <span style={{ fontSize: "18px" }}>{report.total_events}</span>
                           </div>
                         </div>
                       </div>
 
-                      <p className="mt-3"><strong>What does this number prove to judges?</strong></p>
-                      <ul className="list-disc pl-5 space-y-2 mt-1.5 text-foreground">
-                        <li>
-                          <strong>Live Audit Footprint:</strong> This is not an arbitrary mock metric. Every time you submit a prompt in Playground, store a memory, or trigger a security block, this count increments live by +1.
-                        </li>
-                        <li>
-                          <strong>Cryptographic Accountability:</strong> Each of these {report.total_events} entries possesses its own SHA-256 digital signature linked to the previous entry. Zero unmonitored or unrecorded agent actions.
-                        </li>
-                        <li>
-                          <strong>EU AI Act Article 12 Alignment:</strong> Demonstrates high-risk automated logging compliance with continuous recording across the system's operational lifecycle.
-                        </li>
-                      </ul>
+                      <div>
+                        <span style={{ display: "block", fontFamily: FONT_HEAD, fontSize: "12px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#475569", marginBottom: "6px" }}>
+                          What does this number prove?
+                        </span>
+                        <ul style={{ margin: 0, paddingLeft: "20px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                          <li>
+                            <strong>Live Audit Footprint:</strong> Not a mock metric — every prompt, memory store,
+                            and security block increments this count live by +1.
+                          </li>
+                          <li>
+                            <strong>Cryptographic Accountability:</strong> Each of these {report.total_events} entries
+                            has its own SHA-256 signature linked to the previous entry. Zero unmonitored actions.
+                          </li>
+                          <li>
+                            <strong>EU AI Act Article 12 Alignment:</strong> High-risk automated logging compliance
+                            with continuous recording across the operational lifecycle.
+                          </li>
+                        </ul>
+                      </div>
                     </>
                   )}
 
                   {activeModal === "retention_info" && (
                     <>
-                      <p>Under Article 18 of the EU AI Act, logs generated by high-risk AI systems must be kept for a period of at least <strong>10 years</strong>.</p>
-                      <p>AgentShield includes automated daily hash anchoring (saving chain heads to CockroachDB, S3, or external ledgers) to guarantee immutable survival across multi-year windows.</p>
+                      <p style={{ margin: 0 }}>
+                        Under Article 18 of the EU AI Act, logs generated by high-risk AI systems must be kept for
+                        at least <strong>10 years</strong>.
+                      </p>
+                      <p style={{ margin: 0 }}>
+                        AgentShield includes automated daily hash anchoring (saving chain heads to external
+                        storage or ledgers) to guarantee immutable survival across multi-year windows.
+                      </p>
                     </>
                   )}
 
                   {activeModal === "completeness_info" && (
                     <>
-                      <p><strong>100% Completeness</strong> means that out of all events in the system, <strong>zero events</strong> were logged without a cryptographic parent hash.</p>
-                      <p>This guarantees an adversary cannot insert "ghost events" or delete historical logs without breaking the chain validation check.</p>
+                      <p style={{ margin: 0 }}>
+                        <strong>100% Completeness</strong> means that out of all events in the system,{" "}
+                        <strong>zero events</strong> were logged without a cryptographic parent hash.
+                      </p>
+                      <p style={{ margin: 0 }}>
+                        This guarantees an adversary cannot insert &quot;ghost events&quot; or delete historical
+                        logs without breaking the chain validation check.
+                      </p>
                     </>
                   )}
 
                   {activeModal === "chain_integrity_modal" && (
                     <>
-                      <p>AgentShield uses a continuous forward hash chain: <code>hash = SHA256(prev_hash + canonical_json(entry))</code>.</p>
-                      <p>When the verification engine runs, it re-calculates the hash of every single row in the database. If even one byte was changed via SQL or out-of-band manipulation, verification immediately returns <code>false</code> and pinpoints the exact row.</p>
+                      <p style={{ margin: 0 }}>
+                        AgentShield uses a continuous forward hash chain:{" "}
+                        <code style={{ fontFamily: FONT_MONO, fontWeight: 800, background: "#F1F5F9", border: `2px solid ${BLACK}`, borderRadius: "5px", padding: "1px 6px" }}>
+                          hash = SHA256(prev_hash + canonical_json(entry))
+                        </code>
+                        .
+                      </p>
+                      <p style={{ margin: 0 }}>
+                        When the verification engine runs, it re-calculates the hash of every single row. If even
+                        one byte was changed, verification immediately returns <code style={{ fontFamily: FONT_MONO, fontWeight: 800 }}>false</code>{" "}
+                        and pinpoints the exact row.
+                      </p>
                     </>
                   )}
 
                   {activeModal === "chain_length_modal" && (
-                    <>
-                      <p>Total number of linked cryptographic blocks currently in the sequence. Each block points back to the genesis hash, creating an unbroken timeline.</p>
-                    </>
+                    <p style={{ margin: 0 }}>
+                      Total number of linked cryptographic blocks currently in the sequence. Each block points
+                      back to the genesis hash, creating an unbroken timeline.
+                    </p>
                   )}
                 </div>
 
-                <div className="mt-8 flex justify-end">
-                  <button
-                    onClick={() => setActiveModal(null)}
-                    className="px-7 py-3 rounded-xl text-sm font-mono font-bold bg-[#059669] text-black hover:bg-[#10B981] transition-all shadow-md cursor-pointer"
-                  >
-                    Close
-                  </button>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "24px" }}>
+                  <NeoButton onClick={() => setActiveModal(null)}>Close</NeoButton>
                 </div>
               </div>
             )}
